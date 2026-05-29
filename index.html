@@ -2976,17 +2976,10 @@ document.getElementById('btn-autodetect-chord').addEventListener('click',async()
 
   try{
     console.log('🎵 Iniciando auto-detect con BPM:',bpm);
-    progress.textContent='Analizando audio...';
-
-    let pct=0;
-    const progressInterval=setInterval(()=>{
-      if(pct<90) pct+=Math.random()*30;
-      progress.textContent=`Analizando... ${Math.floor(pct)}%`;
-    },200);
+    progress.textContent='Inicializando...';
 
     const detected=await detectChordsFromStem(instBuffer,bpm,instRegionStart,instRegionEnd);
-    clearInterval(progressInterval);
-    progress.textContent='Completado!';
+    progress.textContent='¡Completado!';
 
     console.log('✅ Acordes detectados:',detected);
 
@@ -3063,7 +3056,7 @@ async function detectChordsFromStem(buffer,bpm,regionStart,regionEnd){
   if(!buffer) throw new Error('No hay buffer de audio');
 
   try{
-    console.log('📊 Parámetros:',{bpm,regionStart,regionEnd,bufferLength:buffer.length,sampleRate:buffer.sampleRate});
+    console.log('📊 Iniciando análisis...');
 
     const audioData=buffer.getChannelData(0);
     if(!audioData) throw new Error('No se pudo extraer datos de audio');
@@ -3071,65 +3064,104 @@ async function detectChordsFromStem(buffer,bpm,regionStart,regionEnd){
     const sampleRate=buffer.sampleRate;
     const barDur=4*60/bpm;
     const duration=regionEnd-regionStart;
-    const numBars=Math.ceil(duration/barDur);
+    const numBars=Math.min(Math.ceil(duration/barDur),50); // Max 50 barras
 
-    console.log('📈 Análisis:',{barDur,duration,numBars});
+    console.log(`📈 Detectando ${numBars} barras...`);
 
     const chords=[];
 
+    // Análisis asincrónico para no bloquear el navegador
     for(let i=0;i<numBars;i++){
+      // Yield al navegador cada 5 barras
+      if(i%5===0) await new Promise(r=>setTimeout(r,10));
+
       const barStart=regionStart+i*barDur;
       const barEnd=Math.min(regionStart+(i+1)*barDur,regionEnd);
       const startSample=Math.floor(barStart*sampleRate);
-      const endSample=Math.floor(barEnd*sampleRate);
+      const endSample=Math.floor(Math.min(barEnd,regionEnd)*sampleRate);
 
-      if(startSample<0||endSample>audioData.length){
-        console.warn(`Barra ${i} fuera de rango`);
+      if(startSample<0||endSample<=startSample||endSample>audioData.length){
+        chords.push({index:i,chord:'?',confidence:0,timestamp:barStart});
         continue;
       }
 
       try{
-        const chunk=audioData.slice(startSample,endSample);
-        if(!chunk||chunk.length<512){
+        // Limitar chunk a 22050 samples (~0.5s a 44100Hz)
+        const chunkSize=Math.min(22050,endSample-startSample);
+        const chunk=audioData.slice(startSample,startSample+chunkSize);
+
+        if(chunk.length<512){
           chords.push({index:i,chord:'?',confidence:0,timestamp:barStart});
           continue;
         }
 
-        const chord=detectChordFromChunk(chunk,sampleRate);
+        const chord=detectChordFromChunkFast(chunk,sampleRate);
         chords.push({
           index:i,
           chord:chord.name,
           confidence:chord.confidence,
           timestamp:barStart
         });
+
+        // Update progress
+        document.getElementById('autodetect-progress').textContent=`Barra ${i+1}/${numBars}`;
       }catch(barError){
-        console.warn(`Error en barra ${i}:`,barError);
+        console.warn(`Barra ${i}:`,barError.message);
         chords.push({index:i,chord:'?',confidence:0,timestamp:barStart});
       }
     }
 
-    console.log(`✅ Análisis completado: ${chords.length} barras analizadas`);
+    console.log(`✅ Completado: ${chords.filter(c=>c.chord!=='?').length}/${chords.length} detectados`);
     return chords;
   }catch(e){
-    console.error('❌ Error en detectChordsFromStem:',e);
-    throw new Error('Error al analizar audio: '+e.message);
+    console.error('❌ Error:',e.message);
+    throw new Error('Error al analizar: '+e.message);
   }
 }
 
-// Detect chord from audio chunk using autocorrelation (more accurate)
-function detectChordFromChunk(chunk,sampleRate){
-  if(chunk.length<512) return {name:'?',confidence:0};
+// Fast chord detection - simple spectral analysis (no autocorrelate to avoid hang)
+function detectChordFromChunkFast(chunk,sampleRate){
+  if(!chunk||chunk.length<512) return {name:'?',confidence:0};
 
-  // Use autocorrelate for better accuracy
-  const freq=autoCorrelate(chunk,sampleRate);
+  try{
+    // Simple peak detection in time domain
+    let maxAmp=0;
+    let rms=0;
+    const limit=Math.min(chunk.length,4096);
 
-  if(freq>0&&freq>65&&freq<1050){
-    const rootNote=freqToNote(freq);
-    // Higher confidence for strong autocorrelation results
-    return {name:rootNote,confidence:0.8};
+    for(let i=0;i<limit;i++){
+      const v=Math.abs(chunk[i]);
+      maxAmp=Math.max(maxAmp,v);
+      rms+=v*v;
+    }
+
+    if(maxAmp<0.01) return {name:'?',confidence:0}; // Too quiet
+
+    rms=Math.sqrt(rms/limit);
+    if(rms<0.001) return {name:'?',confidence:0};
+
+    // Estimate fundamental using zero-crossing rate approximation
+    let crossings=0;
+    for(let i=1;i<Math.min(chunk.length,2000);i++){
+      if((chunk[i]>=0&&chunk[i-1]<0)||(chunk[i]<0&&chunk[i-1]>=0)){
+        crossings++;
+      }
+    }
+
+    const zcr=crossings/Math.min(chunk.length,2000);
+    const estFreq=zcr*sampleRate/2; // Rough frequency estimate
+
+    if(estFreq>65&&estFreq<1050){
+      const rootNote=freqToNote(estFreq);
+      const confidence=Math.min(0.9,rms*2);
+      return {name:rootNote,confidence};
+    }
+
+    return {name:'?',confidence:0};
+  }catch(e){
+    console.warn('detectChordFromChunkFast error:',e.message);
+    return {name:'?',confidence:0};
   }
-
-  return {name:'?',confidence:0};
 }
 
 // FFT using Goertzel algorithm (optimized for real-time)
