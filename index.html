@@ -241,6 +241,30 @@ canvas.chart{display:block;width:100%;height:180px;border-radius:10px}
 .score-sub{font-family:'Space Mono',monospace;font-size:11px;color:var(--muted);margin-top:3px;letter-spacing:1px}
 .score-msg{font-size:14px;font-weight:700;margin-top:8px}
 
+/* PIANO HERO */
+#inst-piano-hero-canvas,#inst-result-canvas{display:block;width:100%;max-width:700px;height:auto;border-radius:10px;background:#0a0a10;border:1px solid var(--border2);margin:0 auto}
+.combo-badge{
+  position:absolute;top:10px;left:10px;
+  font-size:24px;font-weight:800;
+  color:var(--amber);
+  text-shadow:0 0 20px var(--amber-glow);
+  transition:all .15s;
+}
+.combo-badge.flash{transform:scale(1.2);color:var(--green-l);text-shadow:0 0 30px var(--green-glow)}
+.strike-zone{stroke:var(--green);stroke-width:3;opacity:.6}
+.falling-card{
+  fill:rgba(255,255,255,0.08);
+  stroke:rgba(255,255,255,0.15);
+  stroke-width:2;
+  border-radius:8px;
+}
+.falling-card.hit{fill:var(--green);stroke:var(--green-l);box-shadow:0 0 20px var(--green-glow)}
+.falling-card.miss{fill:var(--red);stroke:var(--red-glow)}
+.falling-card.wrong{fill:var(--amber);stroke:var(--amber)}
+@keyframes cardFall{from{opacity:1}to{opacity:0}}
+@keyframes hitFlash{0%{opacity:1}100%{opacity:0}}
+.particle{animation:hitFlash .4s ease-out forwards}
+
 /* SEG MAP */
 .seg-map{display:flex;gap:3px;flex-wrap:wrap;margin-top:4px}
 .seg-pip{height:7px;border-radius:2px;flex:1;min-width:6px;max-width:28px;background:var(--surface3);border:1px solid var(--border);cursor:pointer;transition:background .2s}
@@ -708,100 +732,27 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
       </div>
     </div>
 
-    <!-- Sesión -->
+    <!-- Piano Hero Sesión -->
     <div id="inst-session" class="hidden">
       <div class="card">
-        <div class="row-between">
-          <div class="phase-badge idle" id="inst-phase-badge">
-            <span class="dot"></span><span id="inst-phase-text">Listo</span>
-          </div>
-          <button class="btn btn-ghost btn-sm" id="inst-exit-btn">✕ Salir</button>
-        </div>
-        <div class="prog-bar mt8"><div class="prog-fill" id="inst-prog" style="width:0%"></div></div>
-
-        <!-- ESCUCHA -->
-        <div id="inst-ui-listen" class="hidden mt16">
-          <div class="mono" style="font-size:9px;color:var(--blue);margin-bottom:4px">◉ ESCUCHA EL INSTRUMENTO</div>
-          <div class="daw-wrap daw-sm hidden" id="inst-listen-daw">
-            <canvas id="inst-listen-bg" width="700" height="45"></canvas>
-            <canvas id="inst-listen-ov" class="daw-overlay" width="700" height="45"></canvas>
-          </div>
-          <div class="daw-skeleton" id="inst-listen-skeleton" style="height:45px">
-            <div class="daw-skeleton-label">Preparando…</div>
-          </div>
-          <div class="chord-tl mt8"><canvas id="inst-chord-listen" width="700" height="80"></canvas></div>
-          <div id="inst-listen-ready" class="hidden ready-banner">
-            <p>¿LISTO PARA TOCAR?</p>
-            <div class="row" style="justify-content:center;gap:10px">
-              <button class="btn btn-ghost btn-sm" id="btn-inst-listen-again">↺ Escuchar de nuevo</button>
-              <button class="btn btn-green btn-lg" id="btn-inst-ready">🎹 Voy a tocar</button>
-            </div>
+        <div class="row-between" style="margin-bottom:12px">
+          <div style="font-size:13px;font-weight:700" id="inst-game-status">🎹 PIANO HERO</div>
+          <div style="display:flex;gap:6px">
+            <button class="btn btn-ghost btn-sm" id="inst-pause-btn">⏸ Pausa</button>
+            <button class="btn btn-ghost btn-sm" id="inst-exit-btn">✕ Salir</button>
           </div>
         </div>
+        <canvas id="inst-piano-hero-canvas" width="700" height="400"></canvas>
 
-        <!-- CUENTA ATRÁS -->
-        <div id="inst-ui-countdown" class="hidden mt16">
-          <div class="cd-wrap">
-            <div class="mono mt8" style="font-size:11px;color:var(--green-l);letter-spacing:1px;margin-bottom:14px">¡PREPÁRATE PARA TOCAR!</div>
-            <div class="cd-ring">
-              <svg width="76" height="76" viewBox="0 0 76 76">
-                <circle cx="38" cy="38" r="32" fill="none" stroke="rgba(255,255,255,0.05)" stroke-width="5"/>
-                <circle id="inst-cd-arc" cx="38" cy="38" r="32" fill="none" stroke="#52c49b" stroke-width="5"
-                  stroke-dasharray="201" stroke-dashoffset="0" stroke-linecap="round"
-                  style="transition:stroke-dashoffset 1s linear"/>
-              </svg>
-              <div class="cd-n" id="inst-cd-n">3</div>
-            </div>
+        <!-- Result Panel (hidden until game ends) -->
+        <div id="inst-result-panel" class="hidden" style="margin-top:16px">
+          <canvas id="inst-result-canvas" width="700" height="300"></canvas>
+          <div class="row mt12" style="justify-content:center;gap:8px;flex-wrap:wrap">
+            <button class="btn btn-ghost btn-sm" id="inst-btn-retry">↺ Reintentar</button>
+            <button class="btn btn-amber btn-sm" id="inst-btn-next">→ Siguiente</button>
+            <button class="btn btn-red btn-sm" id="inst-btn-exit-result">Salir</button>
           </div>
         </div>
-
-        <!-- TOCAR -->
-        <div id="inst-ui-play" class="hidden mt16">
-          <div class="mono" style="font-size:9px;color:var(--green-l);margin-bottom:4px">◉ TU TURNO — TOCA</div>
-          <div class="chord-tl"><canvas id="inst-chord-play" width="700" height="80"></canvas></div>
-          <div style="text-align:center;margin-top:10px">
-            <div id="inst-cur-chord" style="font-size:72px;font-weight:800;letter-spacing:-3px;line-height:1;transition:color .15s">—</div>
-            <div class="mono" style="font-size:11px;color:var(--muted);margin-top:4px" id="inst-cur-note-info">— Hz</div>
-          </div>
-          <div class="daw-wrap mt8" style="border-radius:8px;overflow:hidden;background:#0e0e16;border:1px solid var(--border2)">
-            <canvas id="inst-mic-wave" width="700" height="52" style="height:52px"></canvas>
-          </div>
-        </div>
-
-        <!-- ESCUCHA GRABACIÓN -->
-        <div id="inst-ui-playback" class="hidden mt16">
-          <div class="mono" style="font-size:10px;color:var(--green-l);letter-spacing:1px;margin-bottom:8px;text-align:center">🎧 ESCUCHA TU GRABACIÓN</div>
-          <audio id="inst-rec-audio" controls></audio>
-          <div class="row mt10" style="justify-content:center;gap:8px">
-            <button class="btn btn-ghost btn-sm" id="inst-btn-save-rec">💾 Guardar</button>
-            <button class="btn btn-green" id="inst-btn-evaluate">Evaluar →</button>
-          </div>
-        </div>
-
-        <!-- RESULTADO -->
-        <div id="inst-ui-result" class="hidden mt16">
-          <div class="chord-tl"><canvas id="inst-chord-result" width="700" height="80"></canvas></div>
-          <div class="row mt12" style="justify-content:center;gap:24px">
-            <div style="text-align:center">
-              <div class="score-num" id="inst-tone-score" style="font-size:clamp(36px,9vw,56px)">0%</div>
-              <div class="score-sub">TONO</div>
-            </div>
-            <div style="text-align:center">
-              <div class="score-num" id="inst-timing-score" style="font-size:clamp(36px,9vw,56px)">0%</div>
-              <div class="score-sub">TIEMPO</div>
-            </div>
-          </div>
-          <div class="score-wrap">
-            <div class="score-num" id="inst-combined-score">0%</div>
-            <div class="score-sub">PUNTAJE COMBINADO</div>
-            <div class="score-msg" id="inst-result-msg"></div>
-          </div>
-          <div class="row mt12" style="justify-content:center;gap:8px">
-            <button class="btn btn-ghost btn-sm" id="inst-btn-retry">↺ Repetir</button>
-            <button class="btn btn-amber btn-sm" id="inst-btn-listen-result">♪ Escuchar</button>
-          </div>
-        </div>
-
       </div>
     </div>
 
@@ -978,17 +929,19 @@ Object.keys(tabs).forEach(key=>{
 ═══════════════════════════════════════════════════════ */
 function loadProgress(){try{return JSON.parse(localStorage.getItem('vocal_progress')||'{}')}catch{return{}}}
 function saveProgress(data){try{localStorage.setItem('vocal_progress',JSON.stringify(data))}catch{}}
-async function recordSession(songKey,avgScore,segCount){
+async function recordSession(songKey,avgScore,segCount,extra=null){
   if(!songKey) return;
   const p=loadProgress();
   if(!p[songKey]) p[songKey]={sessions:[],best:0};
-  p[songKey].sessions.push({date:new Date().toISOString(),avg:avgScore,segs:segCount});
+  const session={date:new Date().toISOString(),avg:avgScore,segs:segCount};
+  if(extra){Object.assign(session,extra);}
+  p[songKey].sessions.push(session);
   if(avgScore>p[songKey].best) p[songKey].best=avgScore;
   saveProgress(p);
   if(sbUser){
-    await sb.from('sessions').insert({
-      user_id:sbUser.id,song_key:songKey,avg_score:avgScore,seg_count:segCount
-    });
+    const row={user_id:sbUser.id,song_key:songKey,avg_score:avgScore,seg_count:segCount};
+    if(extra){Object.assign(row,extra);}
+    await sb.from('sessions').insert(row);
   }
 }
 async function renderProgress(){
@@ -2861,10 +2814,15 @@ function stopAllInstAudio(){
 function instExitPractice(){
   stopAllInstAudio();
   instDetachMidi();
+  cancelAnimationFrame(pianoHeroGame.animId);
+  if(window.pianoHeroMicSample) clearInterval(window.pianoHeroMicSample);
   try{if(instRecorder&&instRecorder.state!=='inactive')instRecorder.stop();}catch{}
   instRecorder=null; instRecBlob=null;
   instPhase='idle';
+  pianoHeroGame.mode='idle';
   document.getElementById('inst-session').classList.add('hidden');
+  document.getElementById('inst-result-panel').classList.add('hidden');
+  document.getElementById('inst-piano-hero-canvas').style.display='block';
   document.getElementById('inst-setup').classList.remove('hidden');
 }
 
@@ -2910,43 +2868,37 @@ document.getElementById('inst-start-btn').addEventListener('click',async()=>{
   if(!instBuffer||!instBars.length) return;
   const btn=document.getElementById('inst-start-btn');
   btn.disabled=true;
-  // Mic (fallback if no MIDI)
-  if(!instMidiEnabled&&!instMicStream?.active){
-    try{instMicStream=await navigator.mediaDevices.getUserMedia({audio:true,video:false});}
-    catch(e){/* mic optional for MIDI users */}
-  }
   const ac=getAudioCtx();
   if(ac.state==='suspended') await ac.resume();
-  for(let i=4;i>0;i--){btn.textContent=`Preparando… ${i}`;await new Promise(r=>setTimeout(r,1000));}
-  btn.textContent='▶ Comenzar práctica'; btn.disabled=false;
   document.getElementById('inst-setup').classList.add('hidden');
-  document.getElementById('inst-session').classList.remove('hidden');
-  instStartListenPhase();
+  await startPianoHeroGame();
 });
-document.getElementById('inst-exit-btn').addEventListener('click',instExitPractice);
-document.getElementById('btn-inst-ready').addEventListener('click',()=>{
-  document.getElementById('inst-listen-ready').classList.add('hidden');
-  instStartCountdown();
+
+document.getElementById('inst-exit-btn').addEventListener('click',()=>{
+  if(pianoHeroGame.mode==='playing'||pianoHeroGame.mode==='paused'){
+    if(confirm('¿Abandonar el juego?')){
+      pianoHeroGame.mode='idle';
+      cancelAnimationFrame(pianoHeroGame.animId);
+      if(window.pianoHeroMicSample) clearInterval(window.pianoHeroMicSample);
+      stopAllInstAudio();
+      instExitPractice();
+    }
+  }else instExitPractice();
 });
-document.getElementById('btn-inst-listen-again').addEventListener('click',()=>{
-  document.getElementById('inst-listen-ready').classList.add('hidden');
-  instStartListenPhase();
+
+document.getElementById('inst-pause-btn').addEventListener('click',()=>{
+  if(pianoHeroGame.paused) resumePianoHero();
+  else pausePianoHero();
 });
-document.getElementById('inst-btn-evaluate').addEventListener('click',()=>{
-  document.getElementById('inst-rec-audio').pause();
-  instShowResult();
+
+document.getElementById('inst-btn-retry').addEventListener('click',()=>{
+  document.getElementById('inst-result-panel').classList.add('hidden');
+  document.getElementById('inst-piano-hero-canvas').style.display='block';
+  startPianoHeroGame();
 });
-document.getElementById('inst-btn-save-rec').addEventListener('click',async()=>{
-  if(!instRecBlob) return;
-  const btn=document.getElementById('inst-btn-save-rec');
-  btn.disabled=true; btn.textContent='💾 Guardando…';
-  try{
-    await saveRecording({songKey:instSongKey,type:'instrument',blob:instRecBlob,date:new Date().toISOString()});
-    btn.textContent='✓ Guardado';
-  }catch(e){btn.disabled=false;btn.textContent='💾 Guardar';}
-});
-document.getElementById('inst-btn-retry').addEventListener('click',()=>instStartListenPhase());
-document.getElementById('inst-btn-listen-result').addEventListener('click',()=>instStartListenPhase());
+
+document.getElementById('inst-btn-next').addEventListener('click',instExitPractice);
+document.getElementById('inst-btn-exit-result').addEventListener('click',instExitPractice);
 // Init MIDI when instrument tab opens
 tabs.inst.btn.addEventListener('click',()=>{if(!instMidiAccess) initMidi();});
 
@@ -2981,6 +2933,255 @@ document.getElementById('btn-moises-parse').addEventListener('click',()=>{
   document.getElementById('moises-status').textContent='';
   document.getElementById('btn-moises-toggle').textContent=`📋 ${chords.length} acordes importados`;
 });
+
+/* ═══════════════════════════════════════════════════════
+   PIANO HERO GAME ENGINE
+═══════════════════════════════════════════════════════ */
+let pianoHeroGame={
+  mode:'idle',cards:[],score:0,combo:0,maxCombo:0,accuracy:{correct:0,total:0},
+  startTime:0,now:0,animId:null,paused:false,result:null
+};
+const PIANO_HERO_W=700,PIANO_HERO_H=400;
+const STRIKE_Y=340;const STRIKE_WINDOW=50;const TIMING_TOL=300;const LOOKAHEAD=3;
+
+async function startPianoHeroGame(){
+  const ac=getAudioCtx();
+  if(ac.state==='suspended') await ac.resume();
+
+  pianoHeroGame={
+    mode:'playing',cards:[],score:0,combo:0,maxCombo:0,accuracy:{correct:0,total:0},
+    startTime:ac.currentTime,now:ac.currentTime,paused:false,result:null
+  };
+
+  // Spawn cards based on instBars
+  const velocity=PIANO_HERO_H/(LOOKAHEAD*1000);
+  const cardW=80,cardH=50;
+  const cols=Math.max(1,Math.floor(700/(cardW+10)));
+  instBars.forEach((bar,i)=>{
+    const x=50+(i%cols)*(cardW+10);
+    pianoHeroGame.cards.push({
+      id:i,chord:bar.chord,time:bar.start,state:'pending',
+      x,y:-100,hit:false,hitTime:null,toneOk:null,timingOk:null
+    });
+  });
+
+  // Play ghost audio
+  stopAllInstAudio();
+  const ac_=getAudioCtx();
+  const src=ac_.createBufferSource();
+  src.buffer=instBuffer;
+  const gn=ac_.createGain();
+  gn.gain.value=0.06;
+  src.connect(gn);gn.connect(ac_.destination);
+  src.start(ac_.currentTime,instRegionStart);
+  instGhostSrc=src;
+
+  // Setup MIDI/mic
+  if(instMidiEnabled) instAttachMidi(ac);
+  else {
+    try{instMicStream=await navigator.mediaDevices.getUserMedia({audio:true});}
+    catch(e){console.log('Mic not available');}
+    if(instMicStream){
+      const an=ac.createAnalyser();an.fftSize=4096;an.smoothingTimeConstant=0.5;
+      ac.createMediaStreamSource(instMicStream).connect(an);
+      instMicAnalyser=an;
+    }
+  }
+
+  // Animation loop
+  function animLoop(){
+    pianoHeroGame.now=getAudioCtx().currentTime;
+    if(!pianoHeroGame.paused) updatePianoHero();
+    drawPianoHeroGame();
+
+    if(instGhostSrc.buffer.duration<=pianoHeroGame.now-pianoHeroGame.startTime+instRegionStart){
+      endPianoHeroGame();
+      return;
+    }
+    pianoHeroGame.animId=requestAnimationFrame(animLoop);
+  }
+
+  // Mic sampling if no MIDI
+  if(!instMidiEnabled){
+    window.pianoHeroMicSample=setInterval(()=>{
+      if(instMicAnalyser&&!pianoHeroGame.paused){
+        const buf=new Float32Array(instMicAnalyser.fftSize);
+        instMicAnalyser.getFloatTimeDomainData(buf);
+        const f=autoCorrelate(buf,getAudioCtx().sampleRate);
+        if(f>0){
+          const m=freqToMidi(f);
+          checkPianoHeroHit(m);
+        }
+      }
+    },80);
+  }
+
+  animLoop();
+  document.getElementById('inst-session').classList.remove('hidden');
+}
+
+function updatePianoHero(){
+  const elapsed=(pianoHeroGame.now-pianoHeroGame.startTime);
+  const velocity=PIANO_HERO_H/(LOOKAHEAD*1000);
+
+  pianoHeroGame.cards.forEach(card=>{
+    if(card.state==='pending'||card.state==='hit'){
+      const cardTime=card.time-instRegionStart;
+      card.y=STRIKE_Y-(cardTime*1000-elapsed)*velocity;
+
+      // Check if card should be marked as missed
+      if(card.y>STRIKE_Y+50&&!card.hit){
+        card.state='miss';
+        pianoHeroGame.combo=0;
+      }
+    }
+  });
+}
+
+function checkPianoHeroHit(midiNote){
+  const ac=getAudioCtx();
+  const now=ac.currentTime-pianoHeroGame.startTime;
+  const notePitch=(midiNote%12+12)%12;
+  const noteName=NOTE_EN[notePitch];
+
+  // Find card in strike zone
+  for(let card of pianoHeroGame.cards){
+    if(card.state==='pending'&&Math.abs(card.y-STRIKE_Y)<STRIKE_WINDOW){
+      const chordRoot=card.chord.replace(/[0-9]/g,'').replace(/m|maj|dim|aug|sus|add.*/,'');
+      const flatMap={'Db':'C#','Eb':'D#','Gb':'F#','Ab':'G#','Bb':'A#'};
+      const expected=flatMap[chordRoot]||chordRoot;
+
+      const cardAbsTime=card.time;
+      const hitDiff=Math.abs((now+(pianoHeroGame.startTime-instRegionStart*1000))-cardAbsTime*1000);
+
+      card.toneOk=(noteName===expected);
+      card.timingOk=(hitDiff<=TIMING_TOL);
+
+      if(card.toneOk&&card.timingOk){
+        card.state='hit';card.hit=true;
+        pianoHeroGame.score+=Math.round(100*(1+pianoHeroGame.combo*0.1));
+        pianoHeroGame.combo++;
+        pianoHeroGame.maxCombo=Math.max(pianoHeroGame.maxCombo,pianoHeroGame.combo);
+        pianoHeroGame.accuracy.correct++;
+      }else if(card.toneOk||card.timingOk){
+        card.state='hit';card.hit=true;
+        pianoHeroGame.score+=50;
+        pianoHeroGame.accuracy.correct+=0.5;
+      }else{
+        card.state='wrong';card.hit=true;
+        pianoHeroGame.combo=0;
+      }
+      pianoHeroGame.accuracy.total++;
+      break;
+    }
+  }
+}
+
+function drawPianoHeroGame(){
+  const canvas=document.getElementById('inst-piano-hero-canvas');
+  if(!canvas) return;
+  const ctx=canvas.getContext('2d');
+
+  // Background
+  ctx.fillStyle='#0a0a10';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  // Falling cards
+  pianoHeroGame.cards.forEach(card=>{
+    if(card.y>-100&&card.y<PIANO_HERO_H+100){
+      const w=80,h=50;
+
+      if(card.state==='hit') ctx.fillStyle='#18956c';
+      else if(card.state==='miss') ctx.fillStyle='#d94545';
+      else if(card.state==='wrong') ctx.fillStyle='#e89c24';
+      else ctx.fillStyle='rgba(255,255,255,0.1)';
+
+      ctx.fillRect(card.x-w/2,card.y-h/2,w,h);
+
+      ctx.fillStyle='#eeecf8';
+      ctx.font='bold 16px Syne';
+      ctx.textAlign='center';
+      ctx.textBaseline='middle';
+      ctx.fillText(card.chord,card.x,card.y);
+    }
+  });
+
+  // Strike line
+  ctx.strokeStyle='#52c49b';
+  ctx.lineWidth=3;
+  ctx.beginPath();
+  ctx.moveTo(0,STRIKE_Y);
+  ctx.lineTo(canvas.width,STRIKE_Y);
+  ctx.stroke();
+
+  // Score + combo
+  ctx.fillStyle='#eeecf8';
+  ctx.font='bold 20px Syne';
+  ctx.textAlign='right';
+  ctx.fillText(`SCORE: ${pianoHeroGame.score}`,canvas.width-10,25);
+
+  ctx.fillStyle='#e89c24';
+  ctx.font='bold 18px Syne';
+  ctx.fillText(`🔥 ${pianoHeroGame.combo}x`,canvas.width-10,50);
+}
+
+function drawPianoHeroResult(){
+  const canvas=document.getElementById('inst-result-canvas');
+  if(!canvas) return;
+  const ctx=canvas.getContext('2d');
+
+  ctx.fillStyle='#0a0a10';
+  ctx.fillRect(0,0,canvas.width,canvas.height);
+
+  const accuracy=pianoHeroGame.accuracy.total?Math.round(pianoHeroGame.accuracy.correct/pianoHeroGame.accuracy.total*100):0;
+  const grade=accuracy>=80?'S':accuracy>=70?'A':accuracy>=60?'B':accuracy>=50?'C':'D';
+
+  // Grade
+  ctx.fillStyle=grade==='S'?'#52c49b':'#e89c24';
+  ctx.font='bold 120px Syne';
+  ctx.textAlign='center';
+  ctx.textBaseline='middle';
+  ctx.fillText(grade,canvas.width/2,120);
+
+  // Stats
+  ctx.fillStyle='#eeecf8';
+  ctx.font='14px Syne';
+  ctx.textAlign='center';
+  ctx.fillText(`Score: ${pianoHeroGame.score}`,canvas.width/2,200);
+  ctx.fillText(`Accuracy: ${accuracy}%`,canvas.width/2,230);
+  ctx.fillText(`Max Combo: 🔥 ${pianoHeroGame.maxCombo}x`,canvas.width/2,260);
+}
+
+function pausePianoHero(){
+  if(pianoHeroGame.mode!=='playing') return;
+  pianoHeroGame.paused=true;
+  if(instGhostSrc) instGhostSrc.stop();
+  if(instMicAnalyser) instMicAnalyser.disconnect();
+  document.getElementById('inst-pause-btn').textContent='▶ Reanudar';
+}
+
+function resumePianoHero(){
+  pianoHeroGame.paused=false;
+  document.getElementById('inst-pause-btn').textContent='⏸ Pausa';
+}
+
+function endPianoHeroGame(){
+  pianoHeroGame.mode='result';
+  cancelAnimationFrame(pianoHeroGame.animId);
+  if(window.pianoHeroMicSample) clearInterval(window.pianoHeroMicSample);
+  stopAllInstAudio();
+
+  // Show result panel
+  document.getElementById('inst-piano-hero-canvas').style.display='none';
+  document.getElementById('inst-result-panel').classList.remove('hidden');
+  drawPianoHeroResult();
+
+  // Save session
+  const accuracy=pianoHeroGame.accuracy.total?Math.round(pianoHeroGame.accuracy.correct/pianoHeroGame.accuracy.total*100):0;
+  const grade=accuracy>=80?'S':accuracy>=70?'A':accuracy>=60?'B':accuracy>=50?'C':'D';
+
+  if(userUid) recordSession(instSongKey,accuracy,1,{mode:'piano-hero',score:pianoHeroGame.score,grade,combo:pianoHeroGame.maxCombo});
+}
 
 /* ═══════════════════════════════════════════════════════
    DROP ZONE HELPER
