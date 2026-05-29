@@ -3119,42 +3119,21 @@ async function detectChordsFromStem(buffer,bpm,regionStart,regionEnd){
   }
 }
 
-// Fast chord detection - simple spectral analysis (no autocorrelate to avoid hang)
+// Chord detection using autocorrelate (accurate, non-blocking)
 function detectChordFromChunkFast(chunk,sampleRate){
   if(!chunk||chunk.length<512) return {name:'?',confidence:0};
 
   try{
-    // Simple peak detection in time domain
-    let maxAmp=0;
-    let rms=0;
-    const limit=Math.min(chunk.length,4096);
+    // Limit size to prevent hangs (already done in detectChordsFromStem)
+    const analysisChunk=chunk.length>4096?chunk.slice(0,4096):chunk;
 
-    for(let i=0;i<limit;i++){
-      const v=Math.abs(chunk[i]);
-      maxAmp=Math.max(maxAmp,v);
-      rms+=v*v;
-    }
+    // Use autoCorrelate for accurate frequency detection
+    const freq=autoCorrelate(analysisChunk,sampleRate);
 
-    if(maxAmp<0.01) return {name:'?',confidence:0}; // Too quiet
-
-    rms=Math.sqrt(rms/limit);
-    if(rms<0.001) return {name:'?',confidence:0};
-
-    // Estimate fundamental using zero-crossing rate approximation
-    let crossings=0;
-    for(let i=1;i<Math.min(chunk.length,2000);i++){
-      if((chunk[i]>=0&&chunk[i-1]<0)||(chunk[i]<0&&chunk[i-1]>=0)){
-        crossings++;
-      }
-    }
-
-    const zcr=crossings/Math.min(chunk.length,2000);
-    const estFreq=zcr*sampleRate/2; // Rough frequency estimate
-
-    if(estFreq>65&&estFreq<1050){
-      const rootNote=freqToNote(estFreq);
-      const confidence=Math.min(0.9,rms*2);
-      return {name:rootNote,confidence};
+    if(freq>0&&freq>65&&freq<1050){
+      const rootNote=freqToNote(freq);
+      // Higher confidence for autocorrelate results
+      return {name:rootNote,confidence:0.85};
     }
 
     return {name:'?',confidence:0};
@@ -3232,7 +3211,7 @@ let pianoHeroGame={
 const PIANO_HERO_W=700,PIANO_HERO_H=400;
 const STRIKE_Y=340;const STRIKE_WINDOW=50;const TIMING_TOL=300;const LOOKAHEAD=3;
 
-async function startPianoHeroGame(){
+async async function startPianoHeroGame(){
   const ac=getAudioCtx();
   if(ac.state==='suspended') await ac.resume();
 
@@ -3241,10 +3220,13 @@ async function startPianoHeroGame(){
     startTime:ac.currentTime,now:ac.currentTime,paused:false,result:null
   };
 
+  console.log('🎮 Piano Hero iniciado con',instBars.length,'barras');
+
   // Spawn cards based on instBars
   const velocity=PIANO_HERO_H/(LOOKAHEAD*1000);
   const cardW=80,cardH=50;
   const cols=Math.max(1,Math.floor(700/(cardW+10)));
+
   instBars.forEach((bar,i)=>{
     const x=50+(i%cols)*(cardW+10);
     pianoHeroGame.cards.push({
@@ -3252,6 +3234,8 @@ async function startPianoHeroGame(){
       x,y:-100,hit:false,hitTime:null,toneOk:null,timingOk:null
     });
   });
+
+  console.log('🎴 Tarjetas creadas:',pianoHeroGame.cards.length);
 
   // Play ghost audio
   stopAllInstAudio();
