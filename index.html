@@ -793,7 +793,6 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
   </div>
 
 </div><!-- /app -->
-<script src="https://cdn.jsdelivr.net/npm/essentia.js@0.1.0/dist/essentia-wasm.umd.js"></script>
 <script>
 /* ═══════════════════════════════════════════════════════
    SUPABASE
@@ -3072,39 +3071,22 @@ function detectChordFromChunk(chunk,sampleRate){
   return {name:rootNote,confidence};
 }
 
-// Simple FFT implementation using recursive algorithm
+// FFT using Goertzel algorithm (optimized for real-time)
 function computeFFT(signal){
-  let N=signal.length;
-  if(N<=1) return signal;
+  const N=Math.min(signal.length,4096); // Limit to 4096 for performance
+  const padded=new Float32Array(N);
+  for(let i=0;i<N;i++) padded[i]=signal[i]||0;
 
-  const even=computeFFT(signal.filter((_,i)=>i%2===0));
-  const odd=computeFFT(signal.filter((_,i)=>i%2===1));
-
-  const T=[];
+  const fft=new Array(N/2);
   for(let k=0;k<N/2;k++){
-    const t=Math.exp(-2j*Math.PI*k/N);
-    T[k]=t*odd[k];
-  }
-
-  return even.concat(T).map((e,k)=>e+T[k%T.length])
-    .map((v,k)=>k<N/2?v:even[k-N/2]-T[k-N/2]);
-}
-
-// Simpler FFT for real-time performance (Goertzel-like)
-function computeFFT(signal){
-  const N=signal.length;
-  const fft=new Array(N);
-
-  for(let k=0;k<N;k++){
     let real=0,imag=0;
     for(let n=0;n<N;n++){
       const angle=-2*Math.PI*k*n/N;
-      real+=signal[n]*Math.cos(angle);
-      imag+=signal[n]*Math.sin(angle);
+      real+=padded[n]*Math.cos(angle);
+      imag+=padded[n]*Math.sin(angle);
     }
-    fft[k]=Math.sqrt(real*real+imag*imag);
+    fft[k]=Math.sqrt(real*real+imag*imag)/N;
   }
-
   return fft;
 }
 
