@@ -3002,6 +3002,27 @@ const CHORD_NOTES={
   'C':[0],'C#':[1],'D':[2],'D#':[3],'E':[4],'F':[5],
   'F#':[6],'G':[7],'G#':[8],'A':[9],'A#':[10],'B':[11]
 };
+// Synesthesia colors (each note has a distinct color)
+const SYNESTHESIA_COLORS={
+  'C':'#FF6B6B',   // Red
+  'C#':'#FF8B6B', // Red-Orange
+  'D':'#FFA500',   // Orange
+  'D#':'#FFB84D', // Orange-Yellow
+  'E':'#FFD700',   // Gold
+  'F':'#7FFF00',   // Lime
+  'F#':'#00DD88', // Green
+  'G':'#00BFFF',   // Deep Sky Blue
+  'G#':'#6495ED', // Cornflower Blue
+  'A':'#9370DB',   // Medium Purple
+  'A#':'#DA70D6', // Orchid
+  'B':'#FF1493',   // Deep Pink
+  '?':'#888888'    // Gray for unknown
+};
+function getChordColor(chordName){
+  // Extract root note from chord name (e.g., "Am" → "A")
+  const root=chordName.replace(/[^A-G#]/g,'').trim()||'?';
+  return SYNESTHESIA_COLORS[root]||SYNESTHESIA_COLORS['?'];
+}
 async function detectChordsFromStem(buffer,bpm,regionStart,regionEnd){
   if(!buffer) return [];
 
@@ -3041,34 +3062,20 @@ async function detectChordsFromStem(buffer,bpm,regionStart,regionEnd){
   }
 }
 
-// Detect chord from audio chunk using spectral analysis
+// Detect chord from audio chunk using autocorrelation (more accurate)
 function detectChordFromChunk(chunk,sampleRate){
   if(chunk.length<512) return {name:'?',confidence:0};
 
-  // Compute FFT
-  const fft=computeFFT(chunk);
-  const spectrum=fft.map(x=>Math.abs(x));
+  // Use autocorrelate for better accuracy
+  const freq=autoCorrelate(chunk,sampleRate);
 
-  // Find peaks in spectrum (potential note frequencies)
-  const peaks=[];
-  for(let i=1;i<spectrum.length-1;i++){
-    if(spectrum[i]>spectrum[i-1]&&spectrum[i]>spectrum[i+1]&&spectrum[i]>0.01){
-      const freq=(i*sampleRate)/(2*spectrum.length);
-      if(freq>50&&freq<2000) peaks.push({freq,mag:spectrum[i]});
-    }
+  if(freq>0&&freq>65&&freq<1050){
+    const rootNote=freqToNote(freq);
+    // Higher confidence for strong autocorrelation results
+    return {name:rootNote,confidence:0.8};
   }
 
-  if(!peaks.length) return {name:'?',confidence:0};
-
-  // Sort by magnitude
-  peaks.sort((a,b)=>b.mag-a.mag);
-  const topFreqs=peaks.slice(0,3).map(p=>p.freq);
-
-  // Detect root note from fundamental frequency
-  const rootNote=freqToNote(topFreqs[0]);
-  const confidence=Math.min(1,peaks[0].mag/peaks.reduce((a,b)=>Math.max(a,b.mag),1));
-
-  return {name:rootNote,confidence};
+  return {name:'?',confidence:0};
 }
 
 // FFT using Goertzel algorithm (optimized for real-time)
@@ -3107,16 +3114,22 @@ function renderAutodetectGrid(chords,threshold=0.5){
   autodetectChords=chords;
   chords.forEach(c=>{
     const el=document.createElement('div');
-    el.style.cssText='padding:8px;background:'+(c.confidence>=threshold?'var(--surface3)':'rgba(255,0,0,0.1)')+';border:1px solid var(--border2);border-radius:6px;text-align:center;cursor:pointer;font-weight:bold;font-size:13px;transition:background .2s';
+    const color=getChordColor(c.chord);
+    const opacity=c.confidence>=threshold?'1':'0.4';
+    el.style.cssText=`padding:10px;background:${color};opacity:${opacity};border:2px solid ${color};border-radius:8px;text-align:center;cursor:pointer;font-weight:bold;font-size:14px;transition:all .2s;color:#fff;text-shadow:0 1px 3px rgba(0,0,0,0.5)`;
     el.className='autodetect-chord-item';
     el.textContent=c.chord;
     el.dataset.index=c.index;
     el.dataset.chord=c.chord;
+    el.onmouseover=()=>{el.style.transform='scale(1.1)';el.style.boxShadow=`0 0 15px ${color}`;};
+    el.onmouseout=()=>{el.style.transform='scale(1)';el.style.boxShadow='none';};
     el.onclick=()=>{
       const chords_input=prompt(`Acorde para compás ${c.index+1}:`,c.chord);
       if(chords_input!==null&&chords_input.trim()){
         c.chord=chords_input.trim().toUpperCase();
         el.textContent=c.chord;
+        el.style.background=getChordColor(c.chord);
+        el.style.borderColor=getChordColor(c.chord);
       }
     };
     grid.appendChild(el);
@@ -3275,20 +3288,35 @@ function drawPianoHeroGame(){
   ctx.fillStyle='#0a0a10';
   ctx.fillRect(0,0,canvas.width,canvas.height);
 
-  // Falling cards
+  // Falling cards with synesthesia colors
   pianoHeroGame.cards.forEach(card=>{
     if(card.y>-100&&card.y<PIANO_HERO_H+100){
       const w=80,h=50;
+      const baseColor=getChordColor(card.chord);
 
-      if(card.state==='hit') ctx.fillStyle='#18956c';
-      else if(card.state==='miss') ctx.fillStyle='#d94545';
-      else if(card.state==='wrong') ctx.fillStyle='#e89c24';
-      else ctx.fillStyle='rgba(255,255,255,0.1)';
+      if(card.state==='hit'){
+        ctx.fillStyle=baseColor;
+        ctx.globalAlpha=1;
+        // Glow effect
+        ctx.shadowColor=baseColor;
+        ctx.shadowBlur=20;
+      }else if(card.state==='miss'){
+        ctx.fillStyle='#d94545';
+        ctx.globalAlpha=0.6;
+      }else if(card.state==='wrong'){
+        ctx.fillStyle='#e89c24';
+        ctx.globalAlpha=0.7;
+      }else{
+        ctx.fillStyle=baseColor;
+        ctx.globalAlpha=0.8;
+      }
 
       ctx.fillRect(card.x-w/2,card.y-h/2,w,h);
+      ctx.globalAlpha=1;
+      ctx.shadowBlur=0;
 
-      ctx.fillStyle='#eeecf8';
-      ctx.font='bold 16px Syne';
+      ctx.fillStyle='#fff';
+      ctx.font='bold 18px Syne';
       ctx.textAlign='center';
       ctx.textBaseline='middle';
       ctx.fillText(card.chord,card.x,card.y);
