@@ -263,6 +263,7 @@ canvas.chart{display:block;width:100%;height:180px;border-radius:10px}
 .falling-card.wrong{fill:var(--amber);stroke:var(--amber)}
 @keyframes cardFall{from{opacity:1}to{opacity:0}}
 @keyframes hitFlash{0%{opacity:1}100%{opacity:0}}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 .particle{animation:hitFlash .4s ease-out forwards}
 
 /* SEG MAP */
@@ -708,6 +709,15 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
             <div class="row mt6" style="justify-content:space-between;align-items:center">
               <span class="mono" style="font-size:10px;color:var(--muted)" id="moises-status"></span>
               <button class="btn btn-accent btn-sm" id="btn-moises-parse">Extraer acordes</button>
+            </div>
+          </div>
+
+          <!-- Loading modal -->
+          <div id="autodetect-loading-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.7);display:flex;align-items:center;justify-content:center;z-index:9999">
+            <div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:40px;text-align:center;max-width:300px">
+              <div style="font-size:48px;margin-bottom:16px;animation:spin 1s linear infinite">⚙️</div>
+              <div style="font-size:16px;font-weight:700;margin-bottom:8px">Detectando acordes...</div>
+              <div style="font-size:12px;color:var(--muted)"><span id="autodetect-progress">Inicializando...</span></div>
             </div>
           </div>
 
@@ -2954,24 +2964,50 @@ document.getElementById('btn-moises-parse').addEventListener('click',()=>{
 
 // Auto-detect chords
 document.getElementById('btn-autodetect-chord').addEventListener('click',async()=>{
-  if(!instBuffer) return;
+  if(!instBuffer){alert('Por favor carga un audio primero');return;}
   const bpm=parseFloat(document.getElementById('inst-bpm').value)||120;
-
   const btn=document.getElementById('btn-autodetect-chord');
-  btn.disabled=true;btn.textContent='🤖 Detectando…';
+  const modal=document.getElementById('autodetect-loading-modal');
+  const progress=document.getElementById('autodetect-progress');
+
+  btn.disabled=true;
+  modal.classList.remove('hidden');
+  progress.textContent='Inicializando análisis...';
+
   try{
+    console.log('🎵 Iniciando auto-detect con BPM:',bpm);
+    progress.textContent='Analizando audio...';
+
+    let pct=0;
+    const progressInterval=setInterval(()=>{
+      if(pct<90) pct+=Math.random()*30;
+      progress.textContent=`Analizando... ${Math.floor(pct)}%`;
+    },200);
+
     const detected=await detectChordsFromStem(instBuffer,bpm,instRegionStart,instRegionEnd);
+    clearInterval(progressInterval);
+    progress.textContent='Completado!';
+
+    console.log('✅ Acordes detectados:',detected);
+
     if(!detected.length){
+      modal.classList.add('hidden');
       alert('No se detectaron acordes. Intenta con un stem más limpio (sin voz).');
+      btn.disabled=false;btn.textContent='🤖 Auto-Detectar';
       return;
     }
+
     const threshold=parseFloat(document.getElementById('autodetect-threshold').value);
     renderAutodetectGrid(detected,threshold);
     document.getElementById('autodetect-panel').classList.remove('hidden');
     document.getElementById('moises-panel').classList.add('hidden');
+
+    modal.classList.add('hidden');
   }catch(e){
-    console.error('Auto-detect error:',e);
-    alert('Error al detectar acordes: '+e.message);
+    console.error('❌ Error en auto-detect:',e);
+    console.error('Stack:',e.stack);
+    modal.classList.add('hidden');
+    alert('Error al detectar acordes:\n\n'+e.message+'\n\nRevisa la consola (F12) para más detalles.');
   }finally{
     btn.disabled=false;btn.textContent='🤖 Auto-Detectar';
   }
@@ -3024,40 +3060,58 @@ function getChordColor(chordName){
   return SYNESTHESIA_COLORS[root]||SYNESTHESIA_COLORS['?'];
 }
 async function detectChordsFromStem(buffer,bpm,regionStart,regionEnd){
-  if(!buffer) return [];
+  if(!buffer) throw new Error('No hay buffer de audio');
 
   try{
-    // Extract audio data
+    console.log('📊 Parámetros:',{bpm,regionStart,regionEnd,bufferLength:buffer.length,sampleRate:buffer.sampleRate});
+
     const audioData=buffer.getChannelData(0);
+    if(!audioData) throw new Error('No se pudo extraer datos de audio');
+
     const sampleRate=buffer.sampleRate;
     const barDur=4*60/bpm;
     const duration=regionEnd-regionStart;
     const numBars=Math.ceil(duration/barDur);
+
+    console.log('📈 Análisis:',{barDur,duration,numBars});
+
     const chords=[];
 
-    // Analyze each bar
     for(let i=0;i<numBars;i++){
       const barStart=regionStart+i*barDur;
       const barEnd=Math.min(regionStart+(i+1)*barDur,regionEnd);
       const startSample=Math.floor(barStart*sampleRate);
       const endSample=Math.floor(barEnd*sampleRate);
 
-      if(startSample<0||endSample>audioData.length) continue;
+      if(startSample<0||endSample>audioData.length){
+        console.warn(`Barra ${i} fuera de rango`);
+        continue;
+      }
 
-      const chunk=audioData.slice(startSample,endSample);
-      const chord=detectChordFromChunk(chunk,sampleRate);
+      try{
+        const chunk=audioData.slice(startSample,endSample);
+        if(!chunk||chunk.length<512){
+          chords.push({index:i,chord:'?',confidence:0,timestamp:barStart});
+          continue;
+        }
 
-      chords.push({
-        index:i,
-        chord:chord.name,
-        confidence:chord.confidence,
-        timestamp:barStart
-      });
+        const chord=detectChordFromChunk(chunk,sampleRate);
+        chords.push({
+          index:i,
+          chord:chord.name,
+          confidence:chord.confidence,
+          timestamp:barStart
+        });
+      }catch(barError){
+        console.warn(`Error en barra ${i}:`,barError);
+        chords.push({index:i,chord:'?',confidence:0,timestamp:barStart});
+      }
     }
 
+    console.log(`✅ Análisis completado: ${chords.length} barras analizadas`);
     return chords;
   }catch(e){
-    console.error('Essentia chord detection error:',e);
+    console.error('❌ Error en detectChordsFromStem:',e);
     throw new Error('Error al analizar audio: '+e.message);
   }
 }
