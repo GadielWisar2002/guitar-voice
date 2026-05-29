@@ -695,7 +695,10 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
         <div class="mt12">
           <div class="row-between" style="margin-bottom:6px">
             <span class="mono" style="font-size:10px;color:var(--muted)">Acordes (separados por coma):</span>
-            <button class="btn btn-ghost btn-sm" id="btn-moises-toggle" style="font-size:10px;padding:3px 10px">📋 Importar de Moises</button>
+            <div style="display:flex;gap:4px;flex-wrap:wrap">
+              <button class="btn btn-ghost btn-sm" id="btn-autodetect-chord" style="font-size:10px;padding:3px 10px" disabled>🤖 Auto-Detectar</button>
+              <button class="btn btn-ghost btn-sm" id="btn-moises-toggle" style="font-size:10px;padding:3px 10px">📋 Importar de Moises</button>
+            </div>
           </div>
           <input type="text" id="inst-chords" placeholder="G, Am, F, C, G, Am, F, C" maxlength="500"
             style="width:100%;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:13px;padding:8px 12px;border-radius:8px;outline:none">
@@ -705,6 +708,20 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
             <div class="row mt6" style="justify-content:space-between;align-items:center">
               <span class="mono" style="font-size:10px;color:var(--muted)" id="moises-status"></span>
               <button class="btn btn-accent btn-sm" id="btn-moises-parse">Extraer acordes</button>
+            </div>
+          </div>
+
+          <!-- Auto-detect panel -->
+          <div id="autodetect-panel" class="hidden mt8">
+            <div class="row" style="gap:8px;align-items:center;margin-bottom:8px">
+              <span class="mono" style="font-size:10px;color:var(--muted)">Confianza mínima:</span>
+              <input type="range" id="autodetect-threshold" min="0.3" max="0.9" step="0.1" value="0.5" style="flex:1;max-width:100px">
+              <span class="mono" style="font-size:10px;color:var(--muted)" id="threshold-value">50%</span>
+            </div>
+            <div id="autodetect-grid" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(60px,1fr));gap:6px;margin-bottom:8px;padding:8px;background:var(--surface2);border-radius:8px;border:1px solid var(--border2)"></div>
+            <div class="row mt6" style="gap:6px;justify-content:flex-end">
+              <button class="btn btn-ghost btn-sm" id="btn-cancel-autodetect">Cancelar</button>
+              <button class="btn btn-accent btn-sm" id="btn-apply-autodetect">✓ Aplicar</button>
             </div>
           </div>
         </div>
@@ -2841,6 +2858,7 @@ setupDropZone(
     document.getElementById('inst-audio-meta').textContent=`${instBuffer.duration.toFixed(1)}s`;
     document.getElementById('inst-drop-audio').classList.add('hidden');
     document.getElementById('inst-audio-pill').classList.remove('hidden');
+    document.getElementById('btn-autodetect-chord').disabled=false;
     instFullBmp=null; instWaveCache.clear();
     instRegionStart=0; instRegionEnd=instBuffer.duration;
     await instRenderRegionWave();
@@ -2933,6 +2951,109 @@ document.getElementById('btn-moises-parse').addEventListener('click',()=>{
   document.getElementById('moises-status').textContent='';
   document.getElementById('btn-moises-toggle').textContent=`📋 ${chords.length} acordes importados`;
 });
+
+// Auto-detect chords
+document.getElementById('btn-autodetect-chord').addEventListener('click',async()=>{
+  if(!instBuffer) return;
+  const bpm=parseFloat(document.getElementById('inst-bpm').value)||120;
+
+  // Generate bars if not already there
+  if(!instBars.length) buildInstBars();
+
+  const btn=document.getElementById('btn-autodetect-chord');
+  btn.disabled=true;btn.textContent='🤖 Detectando…';
+  try{
+    const detected=await detectChordsFromStem(instBuffer,bpm,instRegionStart,instRegionEnd);
+    const threshold=parseFloat(document.getElementById('autodetect-threshold').value);
+    renderAutodetectGrid(detected,threshold);
+    document.getElementById('autodetect-panel').classList.remove('hidden');
+    document.getElementById('moises-panel').classList.add('hidden');
+  }catch(e){
+    console.error('Auto-detect error:',e);
+    alert('Error al detectar acordes. Intenta con un stem más limpio.');
+  }finally{
+    btn.disabled=false;btn.textContent='🤖 Auto-Detectar';
+  }
+});
+
+document.getElementById('autodetect-threshold').addEventListener('change',()=>{
+  const val=(parseFloat(document.getElementById('autodetect-threshold').value)*100).toFixed(0);
+  document.getElementById('threshold-value').textContent=val+'%';
+  if(autodetectChords.length) renderAutodetectGrid(autodetectChords,parseFloat(document.getElementById('autodetect-threshold').value));
+});
+
+document.getElementById('btn-apply-autodetect').addEventListener('click',()=>{
+  const chordStrs=autodetectChords.map(c=>c.chord);
+  document.getElementById('inst-chords').value=chordStrs.join(', ');
+  document.getElementById('autodetect-panel').classList.add('hidden');
+  buildInstBars();
+});
+
+document.getElementById('btn-cancel-autodetect').addEventListener('click',()=>{
+  document.getElementById('autodetect-panel').classList.add('hidden');
+});
+
+/* ═══════════════════════════════════════════════════════
+   AUTO-DETECT CHORDS
+═══════════════════════════════════════════════════════ */
+let autodetectChords=[];
+const CHORD_NOTES={
+  'C':[0],'C#':[1],'D':[2],'D#':[3],'E':[4],'F':[5],
+  'F#':[6],'G':[7],'G#':[8],'A':[9],'A#':[10],'B':[11]
+};
+async function detectChordsFromStem(buffer,bpm,regionStart,regionEnd){
+  if(!buffer||!instBars||!instBars.length) return [];
+  const ac=getAudioCtx();
+  const offlineAc=new OfflineAudioContext(buffer.numberOfChannels,buffer.length,buffer.sampleRate);
+  const src=offlineAc.createBufferSource();
+  src.buffer=buffer;
+  src.connect(offlineAc.destination);
+  src.start(0,regionStart,regionEnd-regionStart);
+  const renderedBuf=await offlineAc.startRendering();
+
+  const chords=[];
+  const barDur=4*60/bpm;
+  for(let i=0;i<instBars.length;i++){
+    const bar=instBars[i];
+    const startSample=Math.floor((bar.start-regionStart)*buffer.sampleRate);
+    const endSample=Math.floor((bar.end-regionStart)*buffer.sampleRate);
+    if(startSample<0||endSample>renderedBuf.length) continue;
+
+    const chunk=renderedBuf.getChannelData(0).slice(startSample,endSample);
+    const freq=autoCorrelate(chunk,buffer.sampleRate);
+
+    if(freq>0){
+      const midi=freqToMidi(freq);
+      const notePitch=(Math.round(midi)%12+12)%12;
+      const noteName=NOTE_EN[notePitch];
+      chords.push({index:i,chord:noteName,confidence:0.7,freq});
+    }else{
+      chords.push({index:i,chord:'?',confidence:0,freq:0});
+    }
+  }
+  return chords;
+}
+function renderAutodetectGrid(chords,threshold=0.5){
+  const grid=document.getElementById('autodetect-grid');
+  grid.innerHTML='';
+  autodetectChords=chords;
+  chords.forEach(c=>{
+    const el=document.createElement('div');
+    el.style.cssText='padding:8px;background:'+(c.confidence>=threshold?'var(--surface3)':'rgba(255,0,0,0.1)')+';border:1px solid var(--border2);border-radius:6px;text-align:center;cursor:pointer;font-weight:bold;font-size:13px;transition:background .2s';
+    el.className='autodetect-chord-item';
+    el.textContent=c.chord;
+    el.dataset.index=c.index;
+    el.dataset.chord=c.chord;
+    el.onclick=()=>{
+      const chords_input=prompt(`Acorde para compás ${c.index+1}:`,c.chord);
+      if(chords_input!==null&&chords_input.trim()){
+        c.chord=chords_input.trim().toUpperCase();
+        el.textContent=c.chord;
+      }
+    };
+    grid.appendChild(el);
+  });
+}
 
 /* ═══════════════════════════════════════════════════════
    PIANO HERO GAME ENGINE
