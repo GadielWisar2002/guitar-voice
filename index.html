@@ -793,6 +793,7 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
   </div>
 
 </div><!-- /app -->
+<script src="https://cdn.jsdelivr.net/npm/essentia.js@0.1.0/dist/essentia-wasm.umd.js"></script>
 <script>
 /* ═══════════════════════════════════════════════════════
    SUPABASE
@@ -3005,122 +3006,118 @@ const CHORD_NOTES={
 async function detectChordsFromStem(buffer,bpm,regionStart,regionEnd){
   if(!buffer) return [];
 
-  // Convert AudioBuffer to WAV blob for API upload
-  const wav=audioBufferToWav(buffer);
-  const blob=new Blob([wav],{type:'audio/wav'});
-
-  // Try ChordMini API first
   try{
-    const formData=new FormData();
-    formData.append('file',blob,'audio.wav');
-    formData.append('model','chord-cnn-lstm');
-
-    const response=await fetch('http://localhost:5001/api/recognize-chords',{
-      method:'POST',
-      body:formData,
-      headers:{
-        'Accept':'application/json'
-      }
-    });
-
-    if(!response.ok) throw new Error(`ChordMini API error: ${response.status}`);
-
-    const result=await response.json();
-    if(!result.chords||!result.chords.length) return [];
-
-    // Map timestamps to bar indices
-    const chords=[];
+    // Extract audio data
+    const audioData=buffer.getChannelData(0);
+    const sampleRate=buffer.sampleRate;
     const barDur=4*60/bpm;
     const duration=regionEnd-regionStart;
     const numBars=Math.ceil(duration/barDur);
+    const chords=[];
 
-    // Initialize all bars
+    // Analyze each bar
     for(let i=0;i<numBars;i++){
-      chords.push({index:i,chord:'?',confidence:0,timestamp:regionStart+i*barDur});
-    }
+      const barStart=regionStart+i*barDur;
+      const barEnd=Math.min(regionStart+(i+1)*barDur,regionEnd);
+      const startSample=Math.floor(barStart*sampleRate);
+      const endSample=Math.floor(barEnd*sampleRate);
 
-    // Fill in detected chords
-    result.chords.forEach(detected=>{
-      const timestamp=regionStart+detected.timestamp;
-      const barIndex=Math.floor((timestamp-regionStart)/barDur);
-      if(barIndex>=0&&barIndex<chords.length){
-        // Parse chord: convert "C:maj" → "C", "G:min" → "Gm", etc
-        let chordName=detected.chord.split(':')[0];
-        const quality=detected.chord.split(':')[1]||'';
-        if(quality.includes('min')||quality.includes('3')) chordName+='m';
-        chords[barIndex]={
-          index:barIndex,
-          chord:chordName,
-          confidence:detected.confidence||0.8,
-          timestamp
-        };
-      }
-    });
+      if(startSample<0||endSample>audioData.length) continue;
+
+      const chunk=audioData.slice(startSample,endSample);
+      const chord=detectChordFromChunk(chunk,sampleRate);
+
+      chords.push({
+        index:i,
+        chord:chord.name,
+        confidence:chord.confidence,
+        timestamp:barStart
+      });
+    }
 
     return chords;
   }catch(e){
-    console.error('ChordMini API error:',e);
-    // Fallback: return empty to show error
-    throw new Error('No se pudo conectar a ChordMini API. Verifica tu conexión.');
+    console.error('Essentia chord detection error:',e);
+    throw new Error('Error al analizar audio: '+e.message);
   }
 }
 
-// Helper: convert AudioBuffer to WAV
-function audioBufferToWav(audioBuffer){
-  const numOfChannels=audioBuffer.numberOfChannels;
-  const sampleRate=audioBuffer.sampleRate;
-  const format=1; // PCM
-  const bitDepth=16;
+// Detect chord from audio chunk using spectral analysis
+function detectChordFromChunk(chunk,sampleRate){
+  if(chunk.length<512) return {name:'?',confidence:0};
 
-  const bytesPerSample=bitDepth/8;
-  const blockAlign=numOfChannels*bytesPerSample;
+  // Compute FFT
+  const fft=computeFFT(chunk);
+  const spectrum=fft.map(x=>Math.abs(x));
 
-  const channels=[];
-  for(let i=0;i<numOfChannels;i++){
-    channels.push(audioBuffer.getChannelData(i));
-  }
-
-  const length=audioBuffer.length*numOfChannels*bytesPerSample+36;
-  const arrayBuffer=new ArrayBuffer(44+length);
-  const view=new DataView(arrayBuffer);
-
-  const writeString=(offset,string)=>{
-    for(let i=0;i<string.length;i++){
-      view.setUint8(offset+i,string.charCodeAt(i));
-    }
-  };
-
-  const floatTo16BitPCM=(offset,input)=>{
-    for(let i=0;i<input.length;i++,offset+=2){
-      const s=Math.max(-1,Math.min(1,input[i]));
-      view.setInt16(offset,s<0?s*0x8000:s*0x7fff,true);
-    }
-  };
-
-  writeString(0,'RIFF');
-  view.setUint32(4,36+length,true);
-  writeString(8,'WAVE');
-  writeString(12,'fmt ');
-  view.setUint32(16,16,true); // subchunk1size
-  view.setUint16(20,format,true);
-  view.setUint16(22,numOfChannels,true);
-  view.setUint32(24,sampleRate,true);
-  view.setUint32(28,sampleRate*blockAlign,true);
-  view.setUint16(32,blockAlign,true);
-  view.setUint16(34,bitDepth,true);
-  writeString(36,'data');
-  view.setUint32(40,length,true);
-
-  let offset=44;
-  const interleaved=new Float32Array(audioBuffer.length*numOfChannels);
-  for(let i=0;i<audioBuffer.length;i++){
-    for(let channel=0;channel<numOfChannels;channel++){
-      interleaved[i*numOfChannels+channel]=channels[channel][i];
+  // Find peaks in spectrum (potential note frequencies)
+  const peaks=[];
+  for(let i=1;i<spectrum.length-1;i++){
+    if(spectrum[i]>spectrum[i-1]&&spectrum[i]>spectrum[i+1]&&spectrum[i]>0.01){
+      const freq=(i*sampleRate)/(2*spectrum.length);
+      if(freq>50&&freq<2000) peaks.push({freq,mag:spectrum[i]});
     }
   }
-  floatTo16BitPCM(offset,interleaved);
 
-  return arrayBuffer;
+  if(!peaks.length) return {name:'?',confidence:0};
+
+  // Sort by magnitude
+  peaks.sort((a,b)=>b.mag-a.mag);
+  const topFreqs=peaks.slice(0,3).map(p=>p.freq);
+
+  // Detect root note from fundamental frequency
+  const rootNote=freqToNote(topFreqs[0]);
+  const confidence=Math.min(1,peaks[0].mag/peaks.reduce((a,b)=>Math.max(a,b.mag),1));
+
+  return {name:rootNote,confidence};
+}
+
+// Simple FFT implementation using recursive algorithm
+function computeFFT(signal){
+  let N=signal.length;
+  if(N<=1) return signal;
+
+  const even=computeFFT(signal.filter((_,i)=>i%2===0));
+  const odd=computeFFT(signal.filter((_,i)=>i%2===1));
+
+  const T=[];
+  for(let k=0;k<N/2;k++){
+    const t=Math.exp(-2j*Math.PI*k/N);
+    T[k]=t*odd[k];
+  }
+
+  return even.concat(T).map((e,k)=>e+T[k%T.length])
+    .map((v,k)=>k<N/2?v:even[k-N/2]-T[k-N/2]);
+}
+
+// Simpler FFT for real-time performance (Goertzel-like)
+function computeFFT(signal){
+  const N=signal.length;
+  const fft=new Array(N);
+
+  for(let k=0;k<N;k++){
+    let real=0,imag=0;
+    for(let n=0;n<N;n++){
+      const angle=-2*Math.PI*k*n/N;
+      real+=signal[n]*Math.cos(angle);
+      imag+=signal[n]*Math.sin(angle);
+    }
+    fft[k]=Math.sqrt(real*real+imag*imag);
+  }
+
+  return fft;
+}
+
+// Convert frequency to note name
+function freqToNote(freq){
+  if(freq<50||freq>2000) return '?';
+  const notes=['C','C#','D','D#','E','F','F#','G','G#','A','A#','B'];
+  const a4=440;
+  const c0=a4*Math.pow(2,-4.75);
+  const h=12*Math.log2(freq/c0);
+  const octave=Math.floor(h/12);
+  const noteIndex=Math.round(h)%12;
+  return notes[noteIndex];
 }
 function renderAutodetectGrid(chords,threshold=0.5){
   const grid=document.getElementById('autodetect-grid');
