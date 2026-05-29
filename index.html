@@ -2957,20 +2957,21 @@ document.getElementById('btn-autodetect-chord').addEventListener('click',async()
   if(!instBuffer) return;
   const bpm=parseFloat(document.getElementById('inst-bpm').value)||120;
 
-  // Generate bars if not already there
-  if(!instBars.length) buildInstBars();
-
   const btn=document.getElementById('btn-autodetect-chord');
   btn.disabled=true;btn.textContent='🤖 Detectando…';
   try{
     const detected=await detectChordsFromStem(instBuffer,bpm,instRegionStart,instRegionEnd);
+    if(!detected.length){
+      alert('No se detectaron acordes. Intenta con un stem más limpio (sin voz).');
+      return;
+    }
     const threshold=parseFloat(document.getElementById('autodetect-threshold').value);
     renderAutodetectGrid(detected,threshold);
     document.getElementById('autodetect-panel').classList.remove('hidden');
     document.getElementById('moises-panel').classList.add('hidden');
   }catch(e){
     console.error('Auto-detect error:',e);
-    alert('Error al detectar acordes. Intenta con un stem más limpio.');
+    alert('Error al detectar acordes: '+e.message);
   }finally{
     btn.disabled=false;btn.textContent='🤖 Auto-Detectar';
   }
@@ -3002,7 +3003,7 @@ const CHORD_NOTES={
   'F#':[6],'G':[7],'G#':[8],'A':[9],'A#':[10],'B':[11]
 };
 async function detectChordsFromStem(buffer,bpm,regionStart,regionEnd){
-  if(!buffer||!instBars||!instBars.length) return [];
+  if(!buffer) return [];
   const ac=getAudioCtx();
   const offlineAc=new OfflineAudioContext(buffer.numberOfChannels,buffer.length,buffer.sampleRate);
   const src=offlineAc.createBufferSource();
@@ -3013,16 +3014,23 @@ async function detectChordsFromStem(buffer,bpm,regionStart,regionEnd){
 
   const chords=[];
   const barDur=4*60/bpm;
-  for(let i=0;i<instBars.length;i++){
-    const bar=instBars[i];
-    const startSample=Math.floor((bar.start-regionStart)*buffer.sampleRate);
-    const endSample=Math.floor((bar.end-regionStart)*buffer.sampleRate);
+  const duration=regionEnd-regionStart;
+  const numBars=Math.ceil(duration/barDur);
+
+  for(let i=0;i<numBars;i++){
+    const barStart=regionStart+i*barDur;
+    const barEnd=Math.min(regionStart+(i+1)*barDur,regionEnd);
+    const startSample=Math.floor((barStart-regionStart)*buffer.sampleRate);
+    const endSample=Math.floor((barEnd-regionStart)*buffer.sampleRate);
+
     if(startSample<0||endSample>renderedBuf.length) continue;
 
-    const chunk=renderedBuf.getChannelData(0).slice(startSample,endSample);
+    const chunk=renderedBuf.getChannelData(0).slice(startSample,Math.min(endSample,renderedBuf.length));
+    if(chunk.length<1024){chunk.fill(0,chunk.length);} // Pad if too short
+
     const freq=autoCorrelate(chunk,buffer.sampleRate);
 
-    if(freq>0){
+    if(freq>65&&freq<1050){
       const midi=freqToMidi(freq);
       const notePitch=(Math.round(midi)%12+12)%12;
       const noteName=NOTE_EN[notePitch];
