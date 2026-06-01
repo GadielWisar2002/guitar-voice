@@ -314,6 +314,7 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
 #auth-sent{font-family:'Space Mono',monospace;font-size:11px;color:var(--green-l)}
 #auth-user{display:flex;align-items:center;gap:8px}
 #auth-name{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted)}
+@keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
@@ -327,6 +328,32 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
         <input type="email" id="auth-email" placeholder="tu@email.com" autocomplete="email">
         <button id="btn-magic" class="btn btn-accent btn-sm" style="font-size:11px;padding:6px 14px">Acceder</button>
       </div>
+
+      <!-- Auth Loading Modal -->
+      <div id="auth-loading-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:9999">
+        <div style="background:var(--surface);border:1px solid var(--border2);border-radius:16px;padding:40px;text-align:center;max-width:350px">
+          <div style="font-size:48px;margin-bottom:16px;animation:spin 1s linear infinite">📧</div>
+          <div style="font-size:18px;font-weight:700;margin-bottom:8px">Enviando enlace...</div>
+          <div style="font-size:13px;color:var(--muted)">Esto toma unos segundos</div>
+        </div>
+      </div>
+
+      <!-- Auth Sent Modal -->
+      <div id="auth-sent-modal" class="hidden" style="position:fixed;inset:0;background:rgba(0,0,0,0.8);display:flex;align-items:center;justify-content:center;z-index:9999">
+        <div style="background:var(--surface);border:2px solid var(--green);border-radius:16px;padding:40px;text-align:center;max-width:400px">
+          <div style="font-size:64px;margin-bottom:20px">✉️</div>
+          <div style="font-size:20px;font-weight:700;margin-bottom:12px;color:var(--green-l)">¡Email enviado!</div>
+          <div style="font-size:14px;color:var(--text);margin-bottom:20px;line-height:1.6">
+            Abrimos un enlace mágico en tu correo.<br>
+            <span style="color:var(--muted)">Revisa inbox (y spam si no lo ves)</span>
+          </div>
+          <div style="font-size:12px;color:var(--muted);background:var(--surface2);padding:12px;border-radius:8px;margin-bottom:20px">
+            El enlace expira en 24 horas
+          </div>
+          <button class="btn btn-ghost btn-sm" id="btn-auth-close" style="width:100%">Entendido</button>
+        </div>
+      </div>
+
       <div id="auth-sent" class="hidden">📧 Revisa tu correo</div>
       <div id="auth-user" class="hidden">
         <span id="auth-name"></span>
@@ -831,18 +858,30 @@ sb.auth.onAuthStateChange((_,session)=>{
 document.getElementById('btn-magic').addEventListener('click',async()=>{
   const email=document.getElementById('auth-email').value.trim();
   if(!email) return;
-  const btn=document.getElementById('btn-magic');
-  btn.disabled=true; btn.textContent='Enviando…';
+
+  // Show loading modal
+  document.getElementById('auth-loading-modal').classList.remove('hidden');
+
   const {error}=await sb.auth.signInWithOtp({
     email,options:{emailRedirectTo:'https://guitar-voice.vercel.app'}
   });
+
+  // Hide loading modal
+  document.getElementById('auth-loading-modal').classList.add('hidden');
+
   if(error){
-    btn.disabled=false; btn.textContent='Acceder';
     alert('Error: '+error.message);
   } else {
     document.getElementById('auth-form').classList.add('hidden');
-    document.getElementById('auth-sent').classList.remove('hidden');
+    document.getElementById('auth-sent-modal').classList.remove('hidden');
   }
+});
+
+// Close auth-sent modal
+document.getElementById('btn-auth-close').addEventListener('click',()=>{
+  document.getElementById('auth-sent-modal').classList.add('hidden');
+  document.getElementById('auth-form').classList.remove('hidden');
+  document.getElementById('auth-email').value='';
 });
 document.getElementById('btn-logout').addEventListener('click',async()=>{
   await sb.auth.signOut();
@@ -3211,7 +3250,7 @@ let pianoHeroGame={
 const PIANO_HERO_W=700,PIANO_HERO_H=400;
 const STRIKE_Y=340;const STRIKE_WINDOW=50;const TIMING_TOL=300;const LOOKAHEAD=3;
 
-async async function startPianoHeroGame(){
+async function startPianoHeroGame(){
   const ac=getAudioCtx();
   if(ac.state==='suspended') await ac.resume();
 
