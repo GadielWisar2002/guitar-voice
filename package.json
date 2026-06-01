@@ -1,0 +1,28 @@
+{
+  "name": "guitar-voice",
+  "version": "1.0.0",
+  "description": "Entrenador vocal interactivo con Piano Hero gamificado y detección automática de acordes",
+  "main": "index.html",
+  "scripts": {
+    "start": "python3 -m http.server 8000",
+    "dev": "python3 -m http.server 8000",
+    "deploy": "vercel --prod",
+    "test": "echo 'Tests not yet implemented'"
+  },
+  "keywords": [
+    "vocal-trainer",
+    "music-education",
+    "web-audio",
+    "piano-hero",
+    "chord-detection"
+  ],
+  "author": "Gadiel Edgar <gadieledgar61@gmail.com>",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/GadielWisar2002/guitar-voice.git"
+  },
+  "homepage": "https://guitar-voice.vercel.app",
+  "devDependencies": {},
+  "dependencies": {}
+}
