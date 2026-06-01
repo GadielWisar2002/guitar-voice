@@ -974,7 +974,7 @@ let instBuffer=null, instAudioFile=null, instSongKey='';
 let instBpm=120, instMode='piano';
 let instBars=[];
 let instPhase='idle';
-let instMicStream=null, instMicAnalyser=null;
+let instMicStream=null, instMicSource=null, instMicAnalyser=null;
 let instPhaseStart=0;
 let instLiveSrc=null, instGhostSrc=null;
 let instAnimId=null, instSampleTimer=null;
@@ -2876,9 +2876,12 @@ async function instStartPlayPhase(){
   const recChunks=[];
   // Mic setup (fallback if no MIDI)
   if(!instMidiEnabled&&instMicStream){
-    const an=ac.createAnalyser(); an.fftSize=4096; an.smoothingTimeConstant=0.5;
-    ac.createMediaStreamSource(instMicStream).connect(an);
-    instMicAnalyser=an;
+    if(!instMicAnalyser){
+      const an=ac.createAnalyser(); an.fftSize=4096; an.smoothingTimeConstant=0.5;
+      if(!instMicSource) instMicSource=ac.createMediaStreamSource(instMicStream);
+      instMicSource.connect(an);
+      instMicAnalyser=an;
+    }
   }
   // MIDI attachment
   if(instMidiEnabled) instAttachMidi(ac);
@@ -3578,11 +3581,14 @@ async function startPianoHeroGame(){
   // Setup MIDI/mic
   if(instMidiEnabled) instAttachMidi(ac);
   else {
-    try{instMicStream=await navigator.mediaDevices.getUserMedia({audio:true});}
-    catch(e){console.log('Mic not available');}
-    if(instMicStream){
+    if(!instMicStream){
+      try{instMicStream=await navigator.mediaDevices.getUserMedia({audio:true});}
+      catch(e){console.log('Mic not available');}
+    }
+    if(instMicStream&&!instMicAnalyser){
       const an=ac.createAnalyser();an.fftSize=4096;an.smoothingTimeConstant=0.5;
-      ac.createMediaStreamSource(instMicStream).connect(an);
+      if(!instMicSource) instMicSource=ac.createMediaStreamSource(instMicStream);
+      instMicSource.connect(an);
       instMicAnalyser=an;
     }
   }
