@@ -14,14 +14,6 @@
       "dest": "/index.html"
     }
   ],
-  "env": {
-    "SUPABASE_URL": {
-      "description": "Supabase project URL"
-    },
-    "SUPABASE_KEY": {
-      "description": "Supabase anonymous key"
-    }
-  },
   "headers": [
     {
       "source": "/(.*)",
