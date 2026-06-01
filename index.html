@@ -715,6 +715,8 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
           <span class="mono" style="font-size:11px;color:var(--muted)">BPM:</span>
           <input type="number" id="inst-bpm" value="120" min="40" max="300"
             style="width:70px;background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Space Mono',monospace;font-size:13px;padding:5px 8px;border-radius:7px;text-align:center">
+          <button id="btn-bpm-half" class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 8px">÷2</button>
+          <button id="btn-bpm-double" class="btn btn-ghost btn-sm" style="font-size:11px;padding:4px 8px">×2</button>
           <button id="btn-detect-bpm" class="btn btn-ghost btn-sm" disabled style="font-size:11px">🎵 Auto BPM</button>
           <select id="inst-mode" style="background:var(--surface2);border:1px solid var(--border2);color:var(--text);font-family:'Syne',sans-serif;font-size:12px;padding:5px 10px;border-radius:7px">
             <option value="piano">🎹 Piano / Acordes</option>
@@ -3144,6 +3146,21 @@ document.getElementById('btn-detect-bpm').addEventListener('click',()=>{
   },50);
 });
 
+// BPM quick adjust buttons
+document.getElementById('btn-bpm-half').addEventListener('click',()=>{
+  const input=document.getElementById('inst-bpm');
+  let bpm=parseInt(input.value)||120;
+  bpm=Math.max(40,Math.round(bpm/2));
+  input.value=bpm;
+});
+
+document.getElementById('btn-bpm-double').addEventListener('click',()=>{
+  const input=document.getElementById('inst-bpm');
+  let bpm=parseInt(input.value)||120;
+  bpm=Math.min(300,Math.round(bpm*2));
+  input.value=bpm;
+});
+
 // Auto-detect chords
 document.getElementById('btn-autodetect-chord').addEventListener('click',async()=>{
   if(!instBuffer){alert('Por favor carga un audio primero');return;}
@@ -3339,11 +3356,20 @@ function detectBPM(buffer,regionStart,regionEnd){
 
   let bpm=Math.round(60/(bestLag*hopSize/sr));
 
-  // 4. Snap to common values if detected BPM is suspicious
+  // 4. Smart snap handling for common mistakes
+  // If BPM is very high (>120), check if it's likely 2x the true tempo
+  if(bpm>120){
+    const halfBpm=Math.round(bpm/2);
+    // Common BPM range: 60-100. If half BPM falls there, likely detected double
+    if(halfBpm>=60&&halfBpm<=100) bpm=halfBpm;
+    else if(bpm>200) bpm=Math.round(bpm/2); // Force divide if >200
+  }
+
+  // If too low, try doubling
   if(bpm<60) bpm=bpm*2;
-  if(bpm>200) bpm=Math.round(bpm/2);
-  if(bpm<40) bpm=120; // Fallback
-  if(bpm>300) bpm=120; // Fallback
+
+  // Fallback for edge cases
+  if(bpm<40||bpm>300) bpm=120;
 
   return Math.max(40,Math.min(300,bpm)); // Clamp to valid range
 }
