@@ -1,0 +1,276 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="UTF-8">
+<title>Demo Modales de Autenticación</title>
+<style>
+:root {
+  --bg:#09090e;
+  --surface:#111119;
+  --surface2:#18181f;
+  --border2:rgba(255,255,255,0.11);
+  --text:#eeecf8;
+  --muted:#6b6a82;
+  --muted2:#3f3e52;
+  --accent:#7c74d8;
+  --green:#18956c;
+  --green-l:#52c49b;
+}
+
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+  background: var(--bg);
+  color: var(--text);
+  font-family: 'Syne', sans-serif;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 100vh;
+  padding: 20px;
+}
+
+.container {
+  width: 100%;
+  max-width: 600px;
+}
+
+h1 { 
+  text-align: center;
+  margin-bottom: 40px;
+  font-size: 24px;
+}
+
+.demo-section {
+  background: var(--surface);
+  border: 1px solid var(--border2);
+  border-radius: 12px;
+  padding: 30px;
+  margin-bottom: 20px;
+}
+
+.demo-section h2 {
+  font-size: 14px;
+  color: var(--muted);
+  margin-bottom: 20px;
+  text-transform: uppercase;
+  letter-spacing: 1px;
+}
+
+/* Form */
+#auth-form {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+#auth-email {
+  background: var(--surface2);
+  border: 1px solid var(--border2);
+  color: var(--text);
+  padding: 8px 12px;
+  border-radius: 8px;
+  width: 200px;
+  font-size: 12px;
+  font-family: 'Space Mono', monospace;
+  outline: none;
+}
+
+#auth-email:focus {
+  border-color: var(--accent);
+}
+
+.btn {
+  padding: 6px 14px;
+  border: none;
+  border-radius: 8px;
+  background: var(--accent);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 700;
+  transition: all 0.2s;
+}
+
+.btn:hover {
+  opacity: 0.9;
+}
+
+.btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* Modals */
+.modal {
+  position: fixed;
+  inset: 0;
+  background: rgba(0,0,0,0.8);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 9999;
+}
+
+.modal.hidden {
+  display: none !important;
+}
+
+.modal-content {
+  background: var(--surface);
+  border-radius: 16px;
+  padding: 40px;
+  text-align: center;
+  max-width: 350px;
+}
+
+.modal-content.success {
+  border: 2px solid var(--green);
+  max-width: 400px;
+}
+
+.modal-emoji {
+  font-size: 48px;
+  margin-bottom: 16px;
+}
+
+.modal-emoji.spin {
+  animation: spin 1s linear infinite;
+}
+
+.modal-emoji.success-icon {
+  font-size: 64px;
+  margin-bottom: 20px;
+}
+
+.modal-title {
+  font-size: 18px;
+  font-weight: 700;
+  margin-bottom: 8px;
+}
+
+.modal-title.success {
+  color: var(--green-l);
+  font-size: 20px;
+  margin-bottom: 12px;
+}
+
+.modal-subtitle {
+  font-size: 13px;
+  color: var(--muted);
+}
+
+.modal-content p {
+  font-size: 14px;
+  color: var(--text);
+  margin: 20px 0;
+  line-height: 1.6;
+}
+
+.modal-content span {
+  color: var(--muted);
+}
+
+.modal-note {
+  font-size: 12px;
+  color: var(--muted);
+  background: var(--surface2);
+  padding: 12px;
+  border-radius: 8px;
+  margin-bottom: 20px;
+}
+
+.btn-close {
+  width: 100%;
+  background: var(--accent);
+  margin-top: 10px;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.info {
+  background: var(--surface2);
+  border-left: 3px solid var(--accent);
+  padding: 12px;
+  border-radius: 6px;
+  margin-bottom: 20px;
+  font-size: 12px;
+  color: var(--muted);
+}
+</style>
+</head>
+<body>
+
+<div class="container">
+  <h1>🔐 Demo de Modales de Autenticación</h1>
+
+  <div class="info">
+    💡 Haz click en "Acceder" para ver los modales en acción
+  </div>
+
+  <div class="demo-section">
+    <h2>Formulario de Login</h2>
+    <div id="auth-form">
+      <input type="email" id="auth-email" placeholder="tu@email.com">
+      <button id="btn-magic" class="btn">Acceder</button>
+    </div>
+  </div>
+
+  <!-- Modal de Cargando -->
+  <div id="auth-loading-modal" class="modal hidden">
+    <div class="modal-content">
+      <div class="modal-emoji spin">📧</div>
+      <div class="modal-title">Enviando enlace...</div>
+      <div class="modal-subtitle">Esto toma unos segundos</div>
+    </div>
+  </div>
+
+  <!-- Modal de Éxito -->
+  <div id="auth-sent-modal" class="modal hidden">
+    <div class="modal-content success">
+      <div class="modal-emoji success-icon">✉️</div>
+      <div class="modal-title success">¡Email enviado!</div>
+      <p>
+        Abrimos un enlace mágico en tu correo.<br>
+        <span>Revisa inbox (y spam si no lo ves)</span>
+      </p>
+      <div class="modal-note">El enlace expira en 24 horas</div>
+      <button id="btn-auth-close" class="btn btn-close">Entendido</button>
+    </div>
+  </div>
+</div>
+
+<script>
+document.getElementById('btn-magic').addEventListener('click', async function() {
+  const email = document.getElementById('auth-email').value.trim();
+  if (!email) {
+    alert('Por favor ingresa un email');
+    return;
+  }
+
+  // Mostrar modal de cargando
+  document.getElementById('auth-loading-modal').classList.remove('hidden');
+
+  // Simular espera de 2 segundos
+  await new Promise(resolve => setTimeout(resolve, 2000));
+
+  // Esconder modal de cargando
+  document.getElementById('auth-loading-modal').classList.add('hidden');
+
+  // Mostrar modal de éxito
+  document.getElementById('auth-sent-modal').classList.remove('hidden');
+});
+
+document.getElementById('btn-auth-close').addEventListener('click', function() {
+  document.getElementById('auth-sent-modal').classList.add('hidden');
+  document.getElementById('auth-email').value = '';
+  console.log('Modal cerrado, formulario limpio');
+});
+</script>
+
+</body>
+</html>

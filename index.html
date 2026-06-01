@@ -3450,6 +3450,26 @@ function detectChordFromChunkFast(chunk,sampleRate){
   }
 }
 
+// Fast realtime chord detection for Piano Hero (uses autoCorrelate, <10ms latency)
+function detectChordFromChunkRealtime(chunk,sampleRate){
+  if(!chunk||chunk.length<512) return {name:'?',confidence:0};
+
+  try{
+    const analysisChunk=chunk.length>4096?chunk.slice(0,4096):chunk;
+    const freq=autoCorrelate(analysisChunk,sampleRate);
+
+    if(freq>0&&freq>65&&freq<1050){
+      const rootNote=freqToNote(freq);
+      return {name:rootNote,confidence:0.85};
+    }
+
+    return {name:'?',confidence:0};
+  }catch(e){
+    console.warn('detectChordFromChunkRealtime error:',e.message);
+    return {name:'?',confidence:0};
+  }
+}
+
 // FFT using Goertzel algorithm (optimized for real-time)
 function computeFFT(signal){
   const N=Math.min(signal.length,4096); // Limit to 4096 for performance
