@@ -315,6 +315,7 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
 #auth-user{display:flex;align-items:center;gap:8px}
 #auth-name{font-family:'Space Mono',monospace;font-size:10px;color:var(--muted)}
 @keyframes spin{from{transform:rotate(0deg)}to{transform:rotate(360deg)}}
+.chord-pill{padding:4px 12px;border-radius:20px;font-family:'Space Mono',monospace;font-size:11px;font-weight:700;color:#fff;opacity:0.9}
 </style>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 </head>
@@ -782,6 +783,31 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
         <div id="inst-chord-edit-grid" style="display:flex;flex-wrap:wrap;gap:6px;margin-bottom:14px"></div>
         <div class="row" style="justify-content:center">
           <button class="btn btn-green btn-lg" id="inst-start-btn" disabled>▶ Comenzar práctica</button>
+        </div>
+      </div>
+
+      <!-- 4 · Escucha la sección -->
+      <div class="card mt8 hidden" id="inst-listen-panel">
+        <div class="card-title">4 · Escucha la sección antes de tocar</div>
+
+        <!-- Waveform de la región con playhead animado -->
+        <div style="position:relative;margin-bottom:12px">
+          <canvas id="inst-listen-wave" width="660" height="60" style="border:1px solid var(--border2);border-radius:8px;display:block"></canvas>
+          <div id="inst-listen-ph" style="position:absolute;top:0;left:0;width:2px;height:60px;background:var(--accent);opacity:0.8;pointer-events:none"></div>
+        </div>
+
+        <!-- Pills de acordes con colores synesthesia -->
+        <div id="inst-listen-chords" style="display:flex;gap:6px;flex-wrap:wrap;margin-bottom:14px;align-items:center"></div>
+
+        <!-- Controles -->
+        <div style="display:flex;align-items:center;gap:12px">
+          <button id="inst-listen-play" class="btn btn-accent">▶ Reproducir</button>
+          <span id="inst-listen-count" style="font-family:'Space Mono',monospace;font-size:11px;color:var(--muted)">
+            Escucha antes de tocar
+          </span>
+          <button id="inst-listen-start" class="btn btn-green" disabled style="margin-left:auto">
+            🎹 ¡A tocar! →
+          </button>
         </div>
       </div>
     </div>
@@ -2598,6 +2624,97 @@ function renderChordEditGrid(){
   });
   document.getElementById('inst-chord-edit-card').classList.remove('hidden');
   document.getElementById('inst-start-btn').disabled=false;
+  showListenPanel();
+}
+
+/* ═══════════════════════════════════════════════════════
+   INSTRUMENTO — LISTEN & REPLICA PANEL
+═══════════════════════════════════════════════════════ */
+let instListenCount=0;
+let instListenAnimId=null;
+
+function showListenPanel(){
+  // Reset listen counter
+  instListenCount=0;
+  document.getElementById('inst-listen-count').textContent='Escucha antes de tocar';
+  document.getElementById('inst-listen-start').disabled=true;
+
+  // Render chord pills with synesthesia colors
+  const chordsDiv=document.getElementById('inst-listen-chords');
+  chordsDiv.innerHTML='';
+  instBars.forEach(bar=>{
+    const pill=document.createElement('div');
+    pill.className='chord-pill';
+    const color=getChordColor(bar.chord);
+    pill.style.backgroundColor=color;
+    pill.textContent=bar.chord;
+    chordsDiv.appendChild(pill);
+  });
+
+  // Draw waveform in listen panel
+  const canvas=document.getElementById('inst-listen-wave');
+  const ctx=canvas.getContext('2d');
+  const dur=instRegionEnd-instRegionStart;
+  const dur_samples=dur*instBuffer.sampleRate;
+
+  // Use cached waveform or draw simple version
+  if(instWaveCache.has(`${instRegionStart}-${instRegionEnd}`)){
+    const bmp=instWaveCache.get(`${instRegionStart}-${instRegionEnd}`);
+    ctx.drawImage(bmp,0,0);
+  } else {
+    // Fallback: draw simple waveform
+    ctx.fillStyle='#1a1a26'; ctx.fillRect(0,0,canvas.width,canvas.height);
+    ctx.strokeStyle='var(--accent)'; ctx.lineWidth=1;
+    const ch=instBuffer.getChannelData(0);
+    const step=Math.ceil(dur_samples/canvas.width);
+    ctx.beginPath();
+    for(let x=0;x<canvas.width;x++){
+      const i_start=Math.floor((instRegionStart*instBuffer.sampleRate))+x*step;
+      const i_end=Math.min(i_start+step, Math.floor((instRegionEnd*instBuffer.sampleRate)));
+      let maxVal=0;
+      for(let i=i_start;i<i_end;i++) maxVal=Math.max(maxVal,Math.abs(ch[i]||0));
+      const y=canvas.height/2-(maxVal*canvas.height/2);
+      if(x===0) ctx.moveTo(x,y); else ctx.lineTo(x,y);
+    }
+    ctx.stroke();
+  }
+
+  // Show listen panel, hide chord edit card
+  document.getElementById('inst-listen-panel').classList.remove('hidden');
+  document.getElementById('inst-chord-edit-card').classList.add('hidden');
+}
+
+function instListenPlay(){
+  // Stop previous playback if any
+  if(instListenAnimId) cancelAnimationFrame(instListenAnimId);
+  if(instPreviewSrc) instStopPreview();
+
+  const dur=instRegionEnd-instRegionStart;
+  const ph=document.getElementById('inst-listen-ph');
+  const canvas=document.getElementById('inst-listen-wave');
+  const startTime=performance.now();
+
+  // Start audio preview
+  instStartPreview();
+
+  // Animate playhead
+  const animate=()=>{
+    const elapsed=(performance.now()-startTime)/1000;
+    const progress=elapsed/dur;
+    const left=Math.floor(progress*canvas.width);
+    ph.style.left=left+'px';
+
+    if(progress<1){
+      instListenAnimId=requestAnimationFrame(animate);
+    } else {
+      // Playback finished
+      instListenCount++;
+      const count=instListenCount;
+      document.getElementById('inst-listen-count').textContent=count+'x escuchada' + (count>1?'s':'');
+      document.getElementById('inst-listen-start').disabled=false;
+    }
+  };
+  instListenAnimId=requestAnimationFrame(animate);
 }
 
 /* ═══════════════════════════════════════════════════════
@@ -2968,6 +3085,15 @@ document.getElementById('inst-btn-next').addEventListener('click',instExitPracti
 document.getElementById('inst-btn-exit-result').addEventListener('click',instExitPractice);
 // Init MIDI when instrument tab opens
 tabs.inst.btn.addEventListener('click',()=>{if(!instMidiAccess) initMidi();});
+
+// Listen panel buttons
+document.getElementById('inst-listen-play').addEventListener('click',instListenPlay);
+document.getElementById('inst-listen-start').addEventListener('click',async()=>{
+  if(!instBuffer||!instBars.length) return;
+  document.getElementById('inst-listen-panel').classList.add('hidden');
+  document.getElementById('inst-setup').classList.add('hidden');
+  await startPianoHeroGame();
+});
 
 /* ═══════════════════════════════════════════════════════
    MOISES CHORD PARSER
