@@ -3374,24 +3374,76 @@ function detectBPM(buffer,regionStart,regionEnd){
   return Math.max(40,Math.min(300,bpm)); // Clamp to valid range
 }
 
-// Chord detection using autocorrelate (accurate, non-blocking)
+// Polyphonic chord templates (major + minor)
+const CHORD_TEMPLATES={
+  'C':[1,0,0,0,1,0,0,1,0,0,0,0],'C#':[0,1,0,0,0,1,0,0,1,0,0,0],
+  'D':[0,0,1,0,0,0,1,0,0,1,0,0],'D#':[0,0,0,1,0,0,0,1,0,0,1,0],
+  'E':[0,0,0,0,1,0,0,0,1,0,0,1],'F':[1,0,0,0,0,1,0,0,0,1,0,0],
+  'F#':[0,1,0,0,0,0,1,0,0,0,1,0],'G':[0,0,1,0,0,0,0,1,0,0,0,1],
+  'G#':[1,0,0,1,0,0,0,0,1,0,0,0],'A':[0,1,0,0,1,0,0,0,0,1,0,0],
+  'A#':[0,0,1,0,0,1,0,0,0,0,1,0],'B':[0,0,0,1,0,0,1,0,0,0,0,1],
+  'Cm':[1,0,0,1,0,0,0,1,0,0,0,0],'C#m':[0,1,0,0,1,0,0,0,1,0,0,0],
+  'Dm':[0,0,1,0,0,1,0,0,0,1,0,0],'D#m':[0,0,0,1,0,0,1,0,0,0,1,0],
+  'Em':[0,0,0,0,1,0,0,1,0,0,0,1],'Fm':[1,0,0,0,0,1,0,0,1,0,0,0],
+  'F#m':[0,1,0,0,0,0,1,0,0,1,0,0],'Gm':[0,0,1,0,0,0,0,1,0,0,1,0],
+  'G#m':[1,0,0,1,0,0,0,0,1,0,0,0],'Am':[0,1,0,0,1,0,0,0,0,1,0,0],
+  'A#m':[0,0,1,0,0,1,0,0,0,0,1,0],'Bm':[0,0,0,1,0,0,1,0,0,0,0,1]
+};
+
+// Compute 12-pitch chromagram using Goertzel algorithm
+function computeChromagram(chunk,sampleRate){
+  const chroma=new Float32Array(12);
+  const N=chunk.length;
+
+  // Analyze each semitone from C2 to C7 (MIDI 36-96)
+  for(let midi=36;midi<=96;midi++){
+    const freq=440*Math.pow(2,(midi-69)/12);
+    const omega=2*Math.PI*freq/sampleRate;
+    const coeff=2*Math.cos(omega);
+
+    let s1=0,s2=0;
+    for(let n=0;n<N;n++){
+      const s0=(chunk[n]||0)+coeff*s1-s2;
+      s2=s1; s1=s0;
+    }
+
+    const energy=Math.sqrt(Math.max(0,s1*s1+s2*s2-coeff*s1*s2));
+    chroma[midi%12]+=energy;
+  }
+
+  // Normalize
+  const max=Math.max(...chroma);
+  if(max>0) for(let i=0;i<12;i++) chroma[i]/=max;
+  return chroma;
+}
+
+// Chord detection using polyphonic chromagram
 function detectChordFromChunkFast(chunk,sampleRate){
   if(!chunk||chunk.length<512) return {name:'?',confidence:0};
 
   try{
-    // Limit size to prevent hangs (already done in detectChordsFromStem)
     const analysisChunk=chunk.length>4096?chunk.slice(0,4096):chunk;
+    const chroma=computeChromagram(analysisChunk,sampleRate);
 
-    // Use autoCorrelate for accurate frequency detection
-    const freq=autoCorrelate(analysisChunk,sampleRate);
+    let bestChord='?',bestScore=-1,secondScore=-1;
 
-    if(freq>0&&freq>65&&freq<1050){
-      const rootNote=freqToNote(freq);
-      // Higher confidence for autocorrelate results
-      return {name:rootNote,confidence:0.85};
+    // Match against all chord templates
+    for(const [name,template] of Object.entries(CHORD_TEMPLATES)){
+      let score=0;
+      for(let i=0;i<12;i++) score+=chroma[i]*template[i];
+
+      if(score>bestScore){
+        secondScore=bestScore;
+        bestScore=score;
+        bestChord=name;
+      }else if(score>secondScore){
+        secondScore=score;
+      }
     }
 
-    return {name:'?',confidence:0};
+    // Confidence based on gap between best and second-best
+    const confidence=Math.min(1,Math.max(0,bestScore-secondScore));
+    return {name:bestChord,confidence};
   }catch(e){
     console.warn('detectChordFromChunkFast error:',e.message);
     return {name:'?',confidence:0};
