@@ -708,6 +708,27 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
         </div>
       </div>
 
+      <!-- 1.5 · MIDI file for Sheet Music Hero -->
+      <div class="card mt8" id="inst-card-midi">
+        <div class="card-title">🎼 MIDI para Sheet Music Hero</div>
+        <div class="drop-zone" id="inst-drop-midi">
+          <input type="file" id="inst-file-midi" accept=".mid,.midi">
+          <span class="dz-icon">🎼</span>
+          <strong>Arrastra el archivo MIDI</strong><p>.mid / .midi</p>
+        </div>
+        <div class="file-pill hidden mt12" id="inst-midi-pill">
+          <span class="fp-icon">🎼</span>
+          <div class="fp-info">
+            <div class="fp-name" id="inst-midi-name">—</div>
+            <div class="fp-meta" id="inst-midi-meta">—</div>
+          </div>
+          <button class="btn btn-ghost btn-sm" id="inst-change-midi">Cambiar</button>
+        </div>
+        <div class="row mt8" style="justify-content:flex-end">
+          <button class="btn btn-green btn-lg" id="inst-smh-start-btn" disabled>🎼 Sheet Music Hero →</button>
+        </div>
+      </div>
+
       <!-- 2 · Tempo y región -->
       <div class="card mt8">
         <div class="card-title">2 · Tempo y región</div>
@@ -983,6 +1004,15 @@ let instBpm=120, instMode='piano';
 let instBars=[];
 let instPhase='idle';
 let instMicStream=null, instMicSource=null, instMicAnalyser=null;
+
+/* ── SHEET MUSIC HERO STATE ── */
+let smhMidiNotes=[];   // [{time,duration,note,velocity}]
+let smhMidiFile=null;  // raw File object
+let smhGame={
+  mode:'idle',notes:[],score:0,combo:0,maxCombo:0,
+  accuracy:{correct:0,total:0},
+  startTime:0,now:0,animId:null,paused:false
+};
 let instPhaseStart=0;
 let instLiveSrc=null, instGhostSrc=null;
 let instAnimId=null, instSampleTimer=null;
@@ -2474,9 +2504,9 @@ function instMidiNoteOn(midiNum,velocity,ac){
     document.getElementById('inst-cur-note-info').textContent=`MIDI ${midiNum} (${noteInfo.en}${noteInfo.octave}) · vel ${velocity}`;
   }
 
-  // Piano Hero mode
-  if(pianoHeroGame.mode==='playing'&&!pianoHeroGame.paused){
-    checkPianoHeroHit(midiNum);
+  // Sheet Music Hero mode
+  if(smhGame.mode==='playing'&&!smhGame.paused){
+    checkSheetMusicHit(midiNum);
   }
 }
 function instAttachMidi(ac){
@@ -3056,6 +3086,7 @@ setupDropZone(
     document.getElementById('inst-audio-pill').classList.remove('hidden');
     document.getElementById('btn-autodetect-chord').disabled=false;
     document.getElementById('btn-detect-bpm').disabled=false;
+    document.getElementById('inst-smh-start-btn').disabled=!smhMidiNotes.length;
     instFullBmp=null; instWaveCache.clear();
     instRegionStart=0; instRegionEnd=instBuffer.duration;
     await instRenderRegionWave();
@@ -3074,7 +3105,35 @@ document.getElementById('inst-change-audio').addEventListener('click',()=>{
   document.getElementById('btn-inst-gen').disabled=true;
   document.getElementById('inst-drop-audio').classList.remove('hidden');
   document.getElementById('inst-audio-pill').classList.add('hidden');
+  document.getElementById('inst-smh-start-btn').disabled=true;
 });
+
+// MIDI file for Sheet Music Hero
+setupDropZone(
+  document.getElementById('inst-drop-midi'),
+  document.getElementById('inst-file-midi'),
+  async file=>{
+    smhMidiFile=file;
+    smhMidiNotes=parseMidi(await file.arrayBuffer());
+    document.getElementById('inst-midi-name').textContent=file.name;
+    document.getElementById('inst-midi-meta').textContent=`${smhMidiNotes.length} notas`;
+    document.getElementById('inst-drop-midi').classList.add('hidden');
+    document.getElementById('inst-midi-pill').classList.remove('hidden');
+    document.getElementById('inst-smh-start-btn').disabled=!instBuffer;
+  }
+);
+document.getElementById('inst-change-midi').addEventListener('click',()=>{
+  smhMidiNotes=[];smhMidiFile=null;
+  document.getElementById('inst-drop-midi').classList.remove('hidden');
+  document.getElementById('inst-midi-pill').classList.add('hidden');
+  document.getElementById('inst-smh-start-btn').disabled=true;
+});
+document.getElementById('inst-smh-start-btn').addEventListener('click',async()=>{
+  if(!instBuffer||!smhMidiNotes.length)return;
+  document.getElementById('inst-setup').classList.add('hidden');
+  await startSheetMusicHero();
+});
+
 document.getElementById('btn-inst-gen').addEventListener('click',()=>{
   if(!instBuffer) return;
   buildInstBars();
@@ -3090,11 +3149,10 @@ document.getElementById('inst-start-btn').addEventListener('click',async()=>{
 });
 
 document.getElementById('inst-exit-btn').addEventListener('click',()=>{
-  if(pianoHeroGame.mode==='playing'||pianoHeroGame.mode==='paused'){
+  if(smhGame.mode==='playing'||smhGame.mode==='result'){
     if(confirm('¿Abandonar el juego?')){
-      pianoHeroGame.mode='idle';
-      cancelAnimationFrame(pianoHeroGame.animId);
-      if(window.pianoHeroMicSample) clearInterval(window.pianoHeroMicSample);
+      smhGame.mode='idle';
+      cancelAnimationFrame(smhGame.animId);
       stopAllInstAudio();
       instExitPractice();
     }
@@ -3102,14 +3160,14 @@ document.getElementById('inst-exit-btn').addEventListener('click',()=>{
 });
 
 document.getElementById('inst-pause-btn').addEventListener('click',()=>{
-  if(pianoHeroGame.paused) resumePianoHero();
-  else pausePianoHero();
+  if(smhGame.paused) resumeSheetMusic();
+  else pauseSheetMusic();
 });
 
 document.getElementById('inst-btn-retry').addEventListener('click',()=>{
   document.getElementById('inst-result-panel').classList.add('hidden');
   document.getElementById('inst-piano-hero-canvas').style.display='block';
-  startPianoHeroGame();
+  startSheetMusicHero();
 });
 
 document.getElementById('inst-btn-next').addEventListener('click',instExitPractice);
@@ -3556,275 +3614,212 @@ function renderAutodetectGrid(chords,threshold=0.5){
 }
 
 /* ═══════════════════════════════════════════════════════
-   PIANO HERO GAME ENGINE
+   MIDI PARSER
 ═══════════════════════════════════════════════════════ */
-let pianoHeroGame={
-  mode:'idle',cards:[],score:0,combo:0,maxCombo:0,accuracy:{correct:0,total:0},
-  startTime:0,now:0,animId:null,paused:false,result:null
-};
-const PIANO_HERO_W=700,PIANO_HERO_H=400;
-const STRIKE_Y=340;const STRIKE_WINDOW=50;const TIMING_TOL=300;const LOOKAHEAD=3;
+function parseMidi(buf){
+  const data=new Uint8Array(buf);
+  let pos=0;
+  function read32(){const v=(data[pos]<<24)|(data[pos+1]<<16)|(data[pos+2]<<8)|data[pos+3];pos+=4;return v>>>0;}
+  function read16(){const v=(data[pos]<<8)|data[pos+1];pos+=2;return v;}
+  function readVarLen(){let val=0,b;do{b=data[pos++];val=(val<<7)|(b&0x7F);}while(b&0x80);return val;}
+  pos+=4;pos+=4;const format=read16();const numTracks=read16();const tpb=read16();
+  let tempo=500000;const allNotes=[];
+  for(let t=0;t<numTracks;t++){
+    pos+=4;const chunkLen=read32();const chunkEnd=pos+chunkLen;
+    let tick=0,rs=0;const pending={};
+    while(pos<chunkEnd){
+      const delta=readVarLen();tick+=delta;
+      let status=data[pos];
+      if(status&0x80){pos++;rs=status;}else{status=rs;}
+      const type=status&0xF0;
+      if(status===0xFF){
+        const mt=data[pos++];const ml=readVarLen();
+        if(mt===0x51&&ml===3)tempo=(data[pos]<<16)|(data[pos+1]<<8)|data[pos+2];
+        pos+=ml;
+      }else if(type===0x90){
+        const note=data[pos++],vel=data[pos++];
+        if(vel>0){pending[note]={tick,vel};}
+        else if(pending[note]){
+          const st=pending[note].tick;
+          allNotes.push({time:st/tpb*(tempo/1e6),duration:Math.max((tick-st)/tpb*(tempo/1e6),0.05),note,velocity:pending[note].vel});
+          delete pending[note];
+        }
+      }else if(type===0x80){
+        const note=data[pos++];pos++;
+        if(pending[note]){
+          const st=pending[note].tick;
+          allNotes.push({time:st/tpb*(tempo/1e6),duration:Math.max((tick-st)/tpb*(tempo/1e6),0.05),note,velocity:pending[note].vel});
+          delete pending[note];
+        }
+      }else if(type===0xA0||type===0xB0||type===0xE0){pos+=2;}
+      else if(type===0xC0||type===0xD0){pos+=1;}
+      else if(status===0xF0||status===0xF7){const l=readVarLen();pos+=l;}
+      else{pos++;}
+    }
+    pos=chunkEnd;
+  }
+  allNotes.sort((a,b)=>a.time-b.time);
+  return allNotes;
+}
 
-async function startPianoHeroGame(){
+/* ═══════════════════════════════════════════════════════
+   SHEET MUSIC HERO GAME ENGINE
+═══════════════════════════════════════════════════════ */
+// smhGame is declared earlier in the state variables section
+// Sheet Music Hero constants
+const SMH_W=700,SMH_H=400;
+const SMH_NOTE_LO=36,SMH_NOTE_HI=84;const SMH_LANES=SMH_NOTE_HI-SMH_NOTE_LO+1;
+const SMH_LANE_W=SMH_W/SMH_LANES;
+const SMH_STRIKE_Y=360;
+const SMH_LOOKAHEAD=3.0;
+const SMH_PX_PER_SEC=SMH_STRIKE_Y/SMH_LOOKAHEAD;
+const SMH_HIT_WINDOW=0.150;const SMH_LANE_PAD=1;
+function smhLaneX(n){return Math.max(0,Math.min(SMH_LANES-1,n-SMH_NOTE_LO))*SMH_LANE_W;}
+function smhNoteY(absTime,nowAudio){return SMH_STRIKE_Y-(absTime-nowAudio)*SMH_PX_PER_SEC;}
+
+async function startSheetMusicHero(){
   const ac=getAudioCtx();
   if(ac.state==='suspended') await ac.resume();
-
-  pianoHeroGame={
-    mode:'playing',cards:[],score:0,combo:0,maxCombo:0,accuracy:{correct:0,total:0},
-    startTime:ac.currentTime,now:ac.currentTime,paused:false,result:null
-  };
-
-  console.log('🎮 Piano Hero iniciado con',instBars.length,'barras');
-
-  // Spawn cards based on instBars
-  const velocity=PIANO_HERO_H/(LOOKAHEAD*1000);
-  const cardW=80,cardH=50;
-  const cols=Math.max(1,Math.floor(700/(cardW+10)));
-
-  instBars.forEach((bar,i)=>{
-    const x=50+(i%cols)*(cardW+10);
-    pianoHeroGame.cards.push({
-      id:i,chord:bar.chord,time:bar.start,state:'pending',
-      x,y:-100,hit:false,hitTime:null,toneOk:null,timingOk:null
-    });
-  });
-
-  console.log('🎴 Tarjetas creadas:',pianoHeroGame.cards.length);
-
-  // Play ghost audio
+  const notes=smhMidiNotes.filter(n=>n.note>=SMH_NOTE_LO&&n.note<=SMH_NOTE_HI).map(n=>({
+    ...n,absTime:n.time+instRegionStart,state:'pending',hitTime:null,flashAlpha:0
+  }));
+  smhGame={mode:'playing',notes,score:0,combo:0,maxCombo:0,
+    accuracy:{correct:0,total:0},startTime:ac.currentTime,now:ac.currentTime,animId:null,paused:false};
+  document.getElementById('inst-game-status').textContent='🎼 SHEET MUSIC HERO';
   stopAllInstAudio();
-  const ac_=getAudioCtx();
-  const src=ac_.createBufferSource();
-  src.buffer=instBuffer;
-  const gn=ac_.createGain();
-  gn.gain.value=0.06;
-  src.connect(gn);gn.connect(ac_.destination);
-  src.start(ac_.currentTime,instRegionStart);
-  instGhostSrc=src;
-
-  // Setup MIDI/mic
+  const src=ac.createBufferSource();src.buffer=instBuffer;
+  const gn=ac.createGain();gn.gain.value=0.08;
+  src.connect(gn);gn.connect(ac.destination);
+  src.start(0,instRegionStart);instGhostSrc=src;
   if(instMidiEnabled) instAttachMidi(ac);
-  else {
-    if(!instMicStream){
-      try{instMicStream=await navigator.mediaDevices.getUserMedia({audio:true});}
-      catch(e){console.log('Mic not available');}
-    }
-    if(instMicStream&&!instMicAnalyser){
-      const an=ac.createAnalyser();an.fftSize=4096;an.smoothingTimeConstant=0.5;
-      if(!instMicSource) instMicSource=ac.createMediaStreamSource(instMicStream);
-      instMicSource.connect(an);
-      instMicAnalyser=an;
-    }
-  }
-
-  // Animation loop
   function animLoop(){
-    pianoHeroGame.now=getAudioCtx().currentTime;
-    if(!pianoHeroGame.paused) updatePianoHero();
-    drawPianoHeroGame();
-
-    if(instGhostSrc.buffer.duration<=pianoHeroGame.now-pianoHeroGame.startTime+instRegionStart){
-      endPianoHeroGame();
-      return;
-    }
-    pianoHeroGame.animId=requestAnimationFrame(animLoop);
+    smhGame.now=getAudioCtx().currentTime;
+    if(!smhGame.paused) updateSheetMusicHero();
+    drawSheetMusicHero();
+    const elapsed=smhGame.now-smhGame.startTime;
+    const audioDur=instGhostSrc.buffer.duration-instRegionStart;
+    if(elapsed>=audioDur){endSheetMusicHero();return;}
+    smhGame.animId=requestAnimationFrame(animLoop);
   }
-
-  // Mic sampling if no MIDI
-  if(!instMidiEnabled){
-    window.pianoHeroMicSample=setInterval(()=>{
-      if(instMicAnalyser&&!pianoHeroGame.paused){
-        const buf=new Float32Array(instMicAnalyser.fftSize);
-        instMicAnalyser.getFloatTimeDomainData(buf);
-        const f=autoCorrelate(buf,getAudioCtx().sampleRate);
-        if(f>0){
-          const m=freqToMidi(f);
-          checkPianoHeroHit(m);
-        }
-      }
-    },80);
-  }
-
   animLoop();
   document.getElementById('inst-session').classList.remove('hidden');
 }
 
-function updatePianoHero(){
-  const elapsed=(pianoHeroGame.now-pianoHeroGame.startTime);
-  const velocity=PIANO_HERO_H/(LOOKAHEAD*1000);
-
-  pianoHeroGame.cards.forEach(card=>{
-    if(card.state==='pending'||card.state==='hit'){
-      const cardTime=card.time-instRegionStart;
-      card.y=STRIKE_Y-(cardTime*1000-elapsed)*velocity;
-
-      // Check if card should be marked as missed
-      if(card.y>STRIKE_Y+50&&!card.hit){
-        card.state='miss';
-        pianoHeroGame.combo=0;
-      }
-    }
+function updateSheetMusicHero(){
+  const elapsed=smhGame.now-smhGame.startTime;
+  const nowAudio=instRegionStart+elapsed;
+  smhGame.notes.forEach(n=>{
+    if(n.state==='pending'&&nowAudio>(n.absTime+n.duration+0.2)){n.state='miss';smhGame.combo=0;}
+    if(n.flashAlpha>0)n.flashAlpha=Math.max(0,n.flashAlpha-0.04);
   });
 }
 
-function checkPianoHeroHit(midiNote){
+function checkSheetMusicHit(midiNote){
   const ac=getAudioCtx();
-  const now=ac.currentTime-pianoHeroGame.startTime;
-  const notePitch=(midiNote%12+12)%12;
-  const noteName=NOTE_EN[notePitch];
-
-  // Find card in strike zone
-  for(let card of pianoHeroGame.cards){
-    if(card.state==='pending'&&Math.abs(card.y-STRIKE_Y)<STRIKE_WINDOW){
-      const chordRoot=card.chord.replace(/[0-9]/g,'').replace(/m|maj|dim|aug|sus|add.*/,'');
-      const flatMap={'Db':'C#','Eb':'D#','Gb':'F#','Ab':'G#','Bb':'A#'};
-      const expected=flatMap[chordRoot]||chordRoot;
-
-      const cardAbsTime=card.time;
-      const hitDiff=Math.abs((now+(pianoHeroGame.startTime-instRegionStart*1000))-cardAbsTime*1000);
-
-      card.toneOk=(noteName===expected);
-      card.timingOk=(hitDiff<=TIMING_TOL);
-
-      if(card.toneOk&&card.timingOk){
-        card.state='hit';card.hit=true;
-        pianoHeroGame.score+=Math.round(100*(1+pianoHeroGame.combo*0.1));
-        pianoHeroGame.combo++;
-        pianoHeroGame.maxCombo=Math.max(pianoHeroGame.maxCombo,pianoHeroGame.combo);
-        pianoHeroGame.accuracy.correct++;
-      }else if(card.toneOk||card.timingOk){
-        card.state='hit';card.hit=true;
-        pianoHeroGame.score+=50;
-        pianoHeroGame.accuracy.correct+=0.5;
-      }else{
-        card.state='wrong';card.hit=true;
-        pianoHeroGame.combo=0;
-      }
-      pianoHeroGame.accuracy.total++;
-      break;
-    }
+  const nowAudio=instRegionStart+(ac.currentTime-smhGame.startTime);
+  let bestNote=null,bestDiff=Infinity;
+  for(const n of smhGame.notes){
+    if(n.state!=='pending'||n.note!==midiNote)continue;
+    const diff=Math.abs(nowAudio-n.absTime);
+    if(diff<SMH_HIT_WINDOW&&diff<bestDiff){bestDiff=diff;bestNote=n;}
+  }
+  if(bestNote){
+    bestNote.state='hit';bestNote.hitTime=nowAudio;bestNote.flashAlpha=1.0;
+    smhGame.score+=Math.round(100*(1+smhGame.combo*0.1));smhGame.combo++;
+    smhGame.maxCombo=Math.max(smhGame.maxCombo,smhGame.combo);
+    smhGame.accuracy.correct++;smhGame.accuracy.total++;
   }
 }
 
-function drawPianoHeroGame(){
-  const canvas=document.getElementById('inst-piano-hero-canvas');
-  if(!canvas) return;
-  const ctx=canvas.getContext('2d');
-
-  // Background
-  ctx.fillStyle='#0a0a10';
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-
-  // Falling cards with synesthesia colors
-  pianoHeroGame.cards.forEach(card=>{
-    if(card.y>-100&&card.y<PIANO_HERO_H+100){
-      const w=80,h=50;
-      const baseColor=getChordColor(card.chord);
-
-      if(card.state==='hit'){
-        ctx.fillStyle=baseColor;
-        ctx.globalAlpha=1;
-        // Glow effect
-        ctx.shadowColor=baseColor;
-        ctx.shadowBlur=20;
-      }else if(card.state==='miss'){
-        ctx.fillStyle='#d94545';
-        ctx.globalAlpha=0.6;
-      }else if(card.state==='wrong'){
-        ctx.fillStyle='#e89c24';
-        ctx.globalAlpha=0.7;
-      }else{
-        ctx.fillStyle=baseColor;
-        ctx.globalAlpha=0.8;
-      }
-
-      ctx.fillRect(card.x-w/2,card.y-h/2,w,h);
-      ctx.globalAlpha=1;
-      ctx.shadowBlur=0;
-
-      ctx.fillStyle='#fff';
-      ctx.font='bold 18px Syne';
-      ctx.textAlign='center';
-      ctx.textBaseline='middle';
-      ctx.fillText(card.chord,card.x,card.y);
+function drawSheetMusicHero(){
+  const canvas=document.getElementById('inst-piano-hero-canvas');if(!canvas)return;
+  const ctx=canvas.getContext('2d');const W=SMH_W,H=SMH_H;
+  const elapsed=smhGame.now-smhGame.startTime;const nowAudio=instRegionStart+elapsed;
+  ctx.fillStyle='#0a0a10';ctx.fillRect(0,0,W,H);
+  for(let n=SMH_NOTE_LO;n<=SMH_NOTE_HI;n++){
+    const pc=n%12;const x=smhLaneX(n);
+    if(pc===0){ctx.fillStyle='rgba(255,255,255,0.04)';ctx.fillRect(x,0,SMH_LANE_W,H);}
+    ctx.fillStyle='rgba(255,255,255,0.02)';ctx.fillRect(x+SMH_LANE_W-1,0,1,H);
+  }
+  ctx.font='7px Space Mono';ctx.textAlign='center';ctx.textBaseline='bottom';
+  for(let n=SMH_NOTE_LO;n<=SMH_NOTE_HI;n++){
+    const pc=n%12;
+    if(pc===0||pc===5){
+      const noteName=NOTE_EN[pc];const octave=Math.floor(n/12)-1;
+      ctx.fillStyle=SYNESTHESIA_COLORS[noteName]||'#888';
+      ctx.fillText(noteName+(pc===0?octave:''),smhLaneX(n)+SMH_LANE_W/2,SMH_STRIKE_Y-4);
     }
+  }
+  smhGame.notes.forEach(n=>{
+    const noteTop=smhNoteY(n.absTime,nowAudio);const noteH=Math.max(8,n.duration*SMH_PX_PER_SEC);
+    if(noteTop<-20||noteTop>H+20)return;
+    const x=smhLaneX(n.note);const w=SMH_LANE_W-SMH_LANE_PAD;
+    const color=SYNESTHESIA_COLORS[NOTE_EN[n.note%12]]||'#888';
+    if(n.state==='hit'){
+      ctx.globalAlpha=Math.max(0.2,n.flashAlpha);ctx.fillStyle=color;
+      ctx.shadowColor=color;ctx.shadowBlur=12;ctx.fillRect(x,noteTop,w,noteH);ctx.shadowBlur=0;
+    }else if(n.state==='miss'){ctx.globalAlpha=0.25;ctx.fillStyle='#d94545';ctx.fillRect(x,noteTop,w,noteH);}
+    else{
+      const proximity=Math.max(0,1-(noteTop/SMH_STRIKE_Y));
+      ctx.globalAlpha=0.3+0.7*proximity;ctx.fillStyle=color;ctx.fillRect(x,noteTop,w,noteH);
+      ctx.globalAlpha=0.6*proximity;ctx.fillStyle='#fff';ctx.fillRect(x,noteTop,w,2);
+    }
+    ctx.globalAlpha=1;
   });
-
-  // Strike line
-  ctx.strokeStyle='#52c49b';
-  ctx.lineWidth=3;
-  ctx.beginPath();
-  ctx.moveTo(0,STRIKE_Y);
-  ctx.lineTo(canvas.width,STRIKE_Y);
-  ctx.stroke();
-
-  // Score + combo
-  ctx.fillStyle='#eeecf8';
-  ctx.font='bold 20px Syne';
-  ctx.textAlign='right';
-  ctx.fillText(`SCORE: ${pianoHeroGame.score}`,canvas.width-10,25);
-
-  ctx.fillStyle='#e89c24';
-  ctx.font='bold 18px Syne';
-  ctx.fillText(`🔥 ${pianoHeroGame.combo}x`,canvas.width-10,50);
+  ctx.fillStyle='rgba(82,196,155,0.06)';
+  ctx.fillRect(0,SMH_STRIKE_Y-SMH_HIT_WINDOW*SMH_PX_PER_SEC,W,SMH_HIT_WINDOW*2*SMH_PX_PER_SEC);
+  ctx.strokeStyle='#52c49b';ctx.lineWidth=2;ctx.beginPath();
+  ctx.moveTo(0,SMH_STRIKE_Y);ctx.lineTo(W,SMH_STRIKE_Y);ctx.stroke();
+  ctx.globalAlpha=1;ctx.fillStyle='#eeecf8';ctx.font='bold 18px Syne';ctx.textAlign='right';ctx.textBaseline='top';
+  ctx.fillText(`SCORE: ${smhGame.score}`,W-10,10);
+  ctx.fillStyle='#e89c24';ctx.font='bold 16px Syne';
+  ctx.fillText(`${smhGame.combo>0?'🔥':''}${smhGame.combo}x`,W-10,34);
+  const totalDur=(instGhostSrc?.buffer?.duration||0)-instRegionStart;
+  const pct=totalDur>0?Math.min(1,elapsed/totalDur):0;
+  ctx.fillStyle='rgba(255,255,255,0.1)';ctx.fillRect(0,H-4,W,4);
+  ctx.fillStyle='#52c49b';ctx.fillRect(0,H-4,W*pct,4);
+  if(smhGame.paused){ctx.fillStyle='rgba(0,0,0,0.6)';ctx.fillRect(0,0,W,H);
+    ctx.fillStyle='#eeecf8';ctx.font='bold 36px Syne';ctx.textAlign='center';ctx.textBaseline='middle';
+    ctx.fillText('PAUSA',W/2,H/2);}
 }
 
-function drawPianoHeroResult(){
-  const canvas=document.getElementById('inst-result-canvas');
-  if(!canvas) return;
+function drawSheetMusicResult(){
+  const canvas=document.getElementById('inst-result-canvas');if(!canvas)return;
   const ctx=canvas.getContext('2d');
-
-  ctx.fillStyle='#0a0a10';
-  ctx.fillRect(0,0,canvas.width,canvas.height);
-
-  const accuracy=pianoHeroGame.accuracy.total?Math.round(pianoHeroGame.accuracy.correct/pianoHeroGame.accuracy.total*100):0;
-  const grade=accuracy>=80?'S':accuracy>=70?'A':accuracy>=60?'B':accuracy>=50?'C':'D';
-
-  // Grade
+  ctx.fillStyle='#0a0a10';ctx.fillRect(0,0,canvas.width,canvas.height);
+  const accuracy=smhGame.accuracy.total?Math.round(smhGame.accuracy.correct/smhGame.accuracy.total*100):0;
+  const grade=accuracy>=90?'S':accuracy>=75?'A':accuracy>=60?'B':accuracy>=45?'C':'D';
   ctx.fillStyle=grade==='S'?'#52c49b':'#e89c24';
-  ctx.font='bold 120px Syne';
-  ctx.textAlign='center';
-  ctx.textBaseline='middle';
+  ctx.font='bold 120px Syne';ctx.textAlign='center';ctx.textBaseline='middle';
   ctx.fillText(grade,canvas.width/2,120);
-
-  // Stats
-  ctx.fillStyle='#eeecf8';
-  ctx.font='14px Syne';
-  ctx.textAlign='center';
-  ctx.fillText(`Score: ${pianoHeroGame.score}`,canvas.width/2,200);
-  ctx.fillText(`Accuracy: ${accuracy}%`,canvas.width/2,230);
-  ctx.fillText(`Max Combo: 🔥 ${pianoHeroGame.maxCombo}x`,canvas.width/2,260);
+  ctx.fillStyle='#eeecf8';ctx.font='14px Space Mono';
+  ctx.fillText(`Score: ${smhGame.score}`,canvas.width/2,200);
+  ctx.fillText(`Accuracy: ${accuracy}%  (${smhGame.accuracy.correct}/${smhGame.accuracy.total})`,canvas.width/2,230);
+  ctx.fillText(`Max Combo: ${smhGame.maxCombo}x`,canvas.width/2,260);
 }
 
-function pausePianoHero(){
-  if(pianoHeroGame.mode!=='playing') return;
-  pianoHeroGame.paused=true;
-  if(instGhostSrc) instGhostSrc.stop();
-  if(instMicAnalyser) instMicAnalyser.disconnect();
+function pauseSheetMusic(){
+  if(smhGame.mode!=='playing')return;
+  smhGame.paused=true;
+  if(instGhostSrc)try{instGhostSrc.stop();}catch{}
   document.getElementById('inst-pause-btn').textContent='▶ Reanudar';
 }
 
-function resumePianoHero(){
-  pianoHeroGame.paused=false;
+function resumeSheetMusic(){
+  smhGame.paused=false;
   document.getElementById('inst-pause-btn').textContent='⏸ Pausa';
 }
 
-function endPianoHeroGame(){
-  pianoHeroGame.mode='result';
-  cancelAnimationFrame(pianoHeroGame.animId);
-  if(window.pianoHeroMicSample) clearInterval(window.pianoHeroMicSample);
+function endSheetMusicHero(){
+  smhGame.mode='result';
+  cancelAnimationFrame(smhGame.animId);
   stopAllInstAudio();
-
-  // Show result panel
   document.getElementById('inst-piano-hero-canvas').style.display='none';
   document.getElementById('inst-result-panel').classList.remove('hidden');
-  drawPianoHeroResult();
-
-  // Save session
-  const accuracy=pianoHeroGame.accuracy.total?Math.round(pianoHeroGame.accuracy.correct/pianoHeroGame.accuracy.total*100):0;
-  const grade=accuracy>=80?'S':accuracy>=70?'A':accuracy>=60?'B':accuracy>=50?'C':'D';
-
-  if(userUid) recordSession(instSongKey,accuracy,1,{mode:'piano-hero',score:pianoHeroGame.score,grade,combo:pianoHeroGame.maxCombo});
+  drawSheetMusicResult();
+  const accuracy=smhGame.accuracy.total?Math.round(smhGame.accuracy.correct/smhGame.accuracy.total*100):0;
+  const grade=accuracy>=90?'S':accuracy>=75?'A':accuracy>=60?'B':accuracy>=45?'C':'D';
+  if(sbUser)recordSession(instSongKey,accuracy,1,{mode:'sheet-music-hero',score:smhGame.score,grade,combo:smhGame.maxCombo});
 }
 
 /* ═══════════════════════════════════════════════════════
