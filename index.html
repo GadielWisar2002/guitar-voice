@@ -825,6 +825,14 @@ textarea.lrc-input::placeholder{color:var(--muted2)}
             <button class="btn btn-ghost btn-sm" id="inst-exit-btn">✕ Salir</button>
           </div>
         </div>
+        <!-- Synesthesia visualization -->
+        <div id="inst-synesthesia" style="display:flex;gap:16px;margin-bottom:16px;align-items:center">
+          <div id="inst-synesthesia-color" style="width:120px;height:120px;border-radius:12px;background:#888;transition:background 0.1s;display:flex;align-items:center;justify-content:center;font-weight:700;color:#fff;font-size:24px;text-shadow:0 0 10px rgba(0,0,0,0.5)"></div>
+          <div style="flex:1">
+            <div style="font-size:28px;font-weight:700" id="inst-synesthesia-note">-</div>
+            <div style="font-size:12px;color:#999;margin-top:8px">Toca una nota en el MIDI</div>
+          </div>
+        </div>
         <canvas id="inst-piano-hero-canvas" width="700" height="400"></canvas>
 
         <!-- Result Panel (hidden until game ends) -->
@@ -2446,14 +2454,30 @@ async function initMidi(){
   }catch(e){instMidiEnabled=false;}
 }
 function instMidiNoteOn(midiNum,velocity,ac){
-  if(instPhase!=='play'||velocity===0) return;
-  const elapsed=ac.currentTime-instPhaseStart;
-  const absTime=instRegionStart+elapsed;
-  const bar=instBars.find(b=>b.start<=absTime&&absTime<b.end);
-  if(bar) bar.userHits.push({time:absTime,midiNote:midiNum,velocity});
+  if(velocity===0) return;
   const noteInfo=midiNote(midiNum);
-  document.getElementById('inst-cur-chord').textContent=noteInfo.en;
-  document.getElementById('inst-cur-note-info').textContent=`MIDI ${midiNum} (${noteInfo.en}${noteInfo.octave}) · vel ${velocity}`;
+
+  // Update synesthesia display
+  const color=SYNESTHESIA_COLORS[noteInfo.en]||'#888';
+  const colorEl=document.getElementById('inst-synesthesia-color');
+  const noteEl=document.getElementById('inst-synesthesia-note');
+  if(colorEl) colorEl.style.background=color;
+  if(noteEl) noteEl.textContent=noteInfo.en+noteInfo.octave;
+
+  // Practice mode
+  if(instPhase==='play'){
+    const elapsed=ac.currentTime-instPhaseStart;
+    const absTime=instRegionStart+elapsed;
+    const bar=instBars.find(b=>b.start<=absTime&&absTime<b.end);
+    if(bar) bar.userHits.push({time:absTime,midiNote:midiNum,velocity});
+    document.getElementById('inst-cur-chord').textContent=noteInfo.en;
+    document.getElementById('inst-cur-note-info').textContent=`MIDI ${midiNum} (${noteInfo.en}${noteInfo.octave}) · vel ${velocity}`;
+  }
+
+  // Piano Hero mode
+  if(pianoHeroGame.mode==='playing'&&!pianoHeroGame.paused){
+    checkPianoHeroHit(midiNum);
+  }
 }
 function instAttachMidi(ac){
   if(!instMidiAccess) return;
